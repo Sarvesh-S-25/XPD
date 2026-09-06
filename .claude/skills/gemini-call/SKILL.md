@@ -15,8 +15,8 @@ delegate.
 
 This project's only Gemini entry point is `.claude/scripts/gemini.mjs`, run
 through the Antigravity CLI (`agy`) — see `.claude/README.md` for the full
-mechanism, and `AGENTS`-style design rules for this repo live in
-`ARCHITECTURE.md` §8 and `PLS-DO.md`, not in any `.agent/` directory (there
+mechanism, and `AGENTS`-style design rules and audit history for this repo
+live in `ARCHITECTURE.md` §11 and §12, not in any `.agent/` directory (there
 isn't one).
 
 ## Dispatch

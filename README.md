@@ -10,6 +10,10 @@ your real usage as you go.
 Everything runs on your own machine. **No API key. No network calls. No account.**
 One SQLite file in your home folder is the whole database.
 
+This file is the runbook — start it, connect it, use it. For how it works
+internally, the formulas, the data files you can tune, the frontend
+conventions, and the project's audit history, see **[`ARCHITECTURE.md`](ARCHITECTURE.md)**.
+
 ---
 
 ## What is in this folder
@@ -21,24 +25,15 @@ p-deliverible/
 ├── connect-meter.bat    ← optional: connect the live usage meter  (Windows)
 │
 ├── promptmeter/         THE ENGINE — all the logic, pure Python
-│   ├── README.md          what every file in here does
 │   └── data/              prices, plan sizes, task priors — edit these
-│       └── README.md      what each table means and how to tune it
 │
 ├── web/                 THE INTERFACE — 3 files, no build step
-│   └── README.md          how the screens are built
-│
 ├── shim/                THE LIVE METER — optional, 1 file
-│   └── README.md          how it hooks into Claude Code
+├── tests/                stdlib unittest suite
 │
-├── README.md            you are here — what it does and how to use it
-├── ARCHITECTURE.md      how it works internally: algorithms and formulas
-├── TERMINAL-SETUP.md    step-by-step guide to the live meter
-└── PLS-DO.md            known faults, what is fixed, what still needs doing
+├── README.md            you are here — how to run and use it
+└── ARCHITECTURE.md      everything else: internals, data, conventions, history
 ```
-
-Each folder has its own `README.md` explaining what it contains. Start with this
-file, then `promptmeter/README.md` if you want to read the code.
 
 **Your data is not in this folder.** It lives in `~/.promptmeter/` (on Windows,
 `C:\Users\you\.promptmeter\`) as a single SQLite file. Delete that folder to
@@ -66,8 +61,8 @@ python -m promptmeter
 Your browser opens at <http://127.0.0.1:7777>. To stop it, press Ctrl+C.
 
 First time in, click **Load sample data** on the Windows page to see the app with
-a few days of plausible history in it. **Erase everything** on the Setup page
-clears it again.
+a few days of plausible history in it. **Clear sample data** on the Setup page
+removes just that; **Erase everything** clears real data too.
 
 ---
 
@@ -83,23 +78,24 @@ install beyond Python.
 **Setup → How big is your window? → Your plan.** One dropdown. This is what
 turns "dollars of work" into "percent of your limit."
 
-### 3 — Sync one reading  *(recommended, 10 seconds)*
+### 3 — Sync one reading *(recommended, 10 seconds)*
 **Windows → Sync from Claude.** Open Claude's own usage view — the ring beside
 the model picker in the desktop app, or `/usage` in the terminal — and copy the
 four values across. PromptMeter divides them into the spend it has already
 recorded and solves for your window's true size. After this the basis reads
 **measured**, and you do not have to do it again.
 
-### 4 — Connect the live meter  *(optional, terminal only)*
+### 4 — Connect the live meter *(optional, terminal only)*
 **Setup → Live status line → Write the setting → Test it**, then restart
 terminal Claude Code. Now the percentages update continuously on their own. See
-`TERMINAL-SETUP.md` for the full walkthrough. This does nothing in the desktop
-app, which has no status line.
+**"Connecting the live meter, step by step"** below for the full walkthrough.
+This does nothing in the desktop app, which has no status line.
 
 ### 5 — Plan a prompt
 **Plan a prompt.** Paste what you were about to send, pick a model and reasoning
-effort, press **Estimate**. You get a verdict in plain English, a size in
-sessions, a token budget, and — if it is too big — a split into steps.
+effort, press **Estimate**. You get a verdict in plain English, a token count
+and a cost, and — if it is too big — a split into steps. Percent-of-window is
+one click away, not the headline.
 
 ### 6 — Create the project
 **Create project** turns the plan into steps you can track, each with its own
@@ -129,239 +125,111 @@ you find out.
 | Screen | What it answers |
 |---|---|
 | **Windows** | How much of my 5-hour and weekly limits is left, and when do I run out at this rate? |
-| **Plan a prompt** | What will this cost, how risky is it, does it need splitting? |
+| **Plan a prompt** | What will this cost in tokens and dollars, how risky is it, does it need splitting? |
 | **Projects** | What am I working on, how far along is each one, what has it cost? |
 | **History** | What has PromptMeter learned about my usage, and were its estimates right? |
-| **Setup** | What tracking can see, calibration, and things worth knowing about plan limits. |
+| **Setup** | What tracking can see, calibration, connecting a provider, and the live status line. |
+
+A persistent bar above every screen — surface, plan, model, reasoning effort —
+is set once and applies to every new plan, so you don't re-pick it per prompt.
 
 ---
 
-## How it works
+## Connecting the live meter, step by step (Windows)
 
-### The windows
+When this is done, PromptMeter shows the same numbers as Claude's own usage
+dialog, updating by itself, covering **all** your usage including Cowork. Total
+time: about five minutes. No Node.js, no API key, no payment. This step is
+entirely optional — automatic tracking (step 8, above) already works without it.
 
-A Pro or Max plan has two limits: a **rolling 5-hour window** and a **7-day weekly
-window**. Both are shared across Claude chat, Claude Code and Cowork — same pool,
-three surfaces. Opus has a separate limit on top of those.
+### 1. Open PowerShell
+Press the **Windows key**, type `powershell`, press **Enter**. A blue window
+opens with a prompt like `PS C:\Users\you>`. You do **not** need to run as
+Administrator.
 
-Anthropic does not publish the numbers behind them. Max 5x is documented as "five
-times more usage per session than Pro" — there is no token figure anywhere. So
-PromptMeter does not try to guess them. It reads the **percentages**, which is the
-quantity actually enforced, and fits everything else from those.
+> If your prompt says `C:\Users\you>` **without** the `PS`, you're in CMD, not
+> PowerShell. Close it and search for "PowerShell" instead.
 
-### Tracking your usage — automatic, both surfaces
-
-**There is nothing to set up.** Claude Code writes every turn it runs to a session
-file under `~/.claude/projects/`, including the exact token counts per message.
-PromptMeter tails those files. That covers the **terminal** and the **desktop
-app** equally, needs no settings change, and refreshes every 20 seconds while the
-app is open.
-
-Open the app, use Claude however you normally do, and the Windows page fills in.
-The Setup page shows how many session files and turns it can see, and has a
-**Check now** button if you don't want to wait for the next sweep.
-
-### One calibration, once
-
-Tracking gives exact dollars of work. Converting that into "percent of your
-window" needs your window's size — and Anthropic publishes no such number for any
-plan. Two ways to supply it:
-
-1. **Pick your plan** (Pro / Max 5x / Max 20x) on the Setup page for a starting
-   estimate. One click.
-2. **Calibrate exactly, once.** Read the two percentages from wherever you use
-   Claude — the usage ring next to the model picker in the desktop app, or
-   `/usage` in the terminal — and press **Calibrate**. PromptMeter divides them
-   into the spend it has already recorded and solves for your true window size.
-   You never do it again.
-
-After calibration the basis on the Windows page reads **measured** instead of
-**plan estimate**, and every later percentage is computed automatically.
-
-### Live status line (optional, terminal only)
-
-The terminal version of Claude Code can hand PromptMeter the exact percentages
-Anthropic enforces on, continuously — and each one re-calibrates the window size
-for free. This is a precision upgrade on top of automatic tracking, not a
-requirement.
-
-**It does nothing in the desktop app**, which has no status line to attach to.
-
-On the Setup page press **Write the setting**, then **Test it**, then restart the
-terminal Claude Code. It works out the right paths for your machine, backs up your
-existing `settings.json`, and merges in one key while preserving everything else.
-There is an **Undo** button. From a console instead:
-
+### 2. Install Claude Code
+```powershell
+irm https://claude.ai/install.ps1 | iex
 ```
-python -m promptmeter --connect          # add --force to replace an existing one
-python -m promptmeter --disconnect       # undo
+Wait for it to finish. It downloads a single program — no Node.js needed.
+
+### 3. Close PowerShell and open it again
+Not optional — Windows only picks up the new `claude` command in a fresh window.
+Then check it worked: `claude --version` should print something like
+`2.1.233 (Claude Code)`.
+
+### 4. Log in
+Type `claude`. First run asks for a colour theme (pick any), then a login
+method — choose **"Claude account with subscription"**. Your browser opens;
+sign in and approve. Go back to PowerShell — it will say you're logged in.
+
+### 5. Prove the numbers are there
+Still inside Claude Code, type `/usage`. You should see **Current session** and
+**Weekly** bars — the same ones as the app's usage dialog. This costs nothing.
+Seeing them here means PromptMeter can get them too. Leave with `/exit`.
+
+### 6. Connect PromptMeter
+Make sure PromptMeter is running (`start.bat` if not). Go to **Setup → Live
+status line**, click **Write the setting**, then **Test it** — you want the
+green "It works" box. If Test it fails saying Python wasn't found, install
+Python from [python.org/downloads](https://www.python.org/downloads/) and tick
+**"Add python.exe to PATH"** on the installer's first screen.
+
+### 7. Start Claude Code again and send one message
+```powershell
+claude
 ```
+Type anything — `hi` will do. A usage bar appears at the bottom of the Claude
+Code window, and PromptMeter's Windows page turns green with your real
+percentages. The one message is needed because Claude Code only receives the
+limit numbers after its first reply in a session.
 
-Windows users can double-click `connect-meter.bat`.
+### What you have now
+Live limits matching Claude's own dialog, updating continuously, covering
+Cowork/browser/desktop/terminal (one shared pool), at no cost — the status line
+is a local script making no API calls.
 
-If you edit the file by hand, use **Show me the file instead** — it prints the
-complete file with your real paths already filled in. Copy that; never paste
-anything containing a placeholder like `<this folder>`.
+**Day to day:** whenever a terminal session is open, PromptMeter updates on its
+own. With no session running, the numbers keep ticking from the last reading —
+countdowns run down, bars reset themselves at a window rollover. To re-sync
+immediately after heavy Cowork/browser use, open a terminal session for a
+moment, or use **Sync from Claude** on the Windows page.
 
-### Measured plan capacity
+**Undo:** the **Undo** button on the Setup page, or `python -m promptmeter
+--disconnect`. Your other settings are untouched.
 
-Once samples come in, PromptMeter fits one number — percent of window consumed per
-dollar of list-price work — and inverts it. That gives you your plan's real
-capacity in dollars-equivalent per window: the limit that isn't published,
-derived from your own usage. It's labelled *default* / *learning* / *measured* so
-you always know how much to trust it.
+### If something goes wrong
 
-### Models — Claude, GPT and Gemini
-
-The catalogue in `promptmeter/data/models.json` covers Anthropic, OpenAI and
-Google, plus a free "local model" entry. Each model carries what the estimator
-actually needs, not just a price:
-
-| Field | Why it matters |
+| What you see | What to do |
 |---|---|
-| `in` / `out` | list price per million tokens |
-| `cache_read`, `cache_write_*` | Anthropic charges a premium to write cache; OpenAI and Google cache automatically |
-| `context` | 200k to 1.05M depending on model — drives the compaction estimate |
-| `max_output` | ceiling on one reply; long answers get truncated or continued |
-| `thinking_share` | how much of the output is reasoning, per effort level |
-| `long_context` | Gemini Pro switches to a higher rate above 200k tokens |
+| `irm ... is not recognized` | You're in CMD, not PowerShell. Open PowerShell. |
+| `claude is not recognized` | Close and reopen PowerShell. If it persists, restart the PC. |
+| Test it says Python not found | Reinstall Python, ticking **Add python.exe to PATH**. |
+| No bar at the bottom of Claude Code | You started `claude` before writing the setting. `/exit` and start it again. |
+| App still yellow after a message | Press **Check again** on Setup. Confirm `/usage` shows bars inside Claude Code. |
 
-Prices were verified against vendor pricing pages in **August 2026**. They
-change — the file is plain JSON, edit it.
+Run `claude doctor` in PowerShell for a health check of the Claude Code install
+itself.
 
-### Token budget — where the tokens actually go
+---
 
-Every estimate now shows the full accounting, typical and worst case: input sent
-across all turns, how much of that is conversation re-sent, output generated,
-how much of the output is **thinking**, peak conversation size against the
-model's context window, and whether the run would need **compaction**.
-
-Compaction is a real cost, not just a limit. When the conversation outgrows the
-window the agent must summarise and continue — a large read plus a summary
-write. The estimator counts it:
+## Command reference
 
 ```
-peak = base + growth × (turns − 1) + output_per_turn
-if peak > window:
-    compactions = ceil((peak − window) / (window × 0.5))
-    extra = compactions × (window × 0.70  +  summary)
+python -m promptmeter                    # start on the default port (7777)
+python -m promptmeter --port 7788        # start on a different port
+python -m promptmeter --no-browser       # start without opening a browser tab
+python -m promptmeter --connect          # write the status-line setting (add --force to replace an existing one)
+python -m promptmeter --disconnect       # undo the status-line setting
 ```
 
-### Reasoning effort
+Windows users can double-click `connect-meter.bat` instead of `--connect`.
 
-Thinking tokens are billed as output tokens by all three vendors. The effort
-selector (`none` → `max`) scales the output prediction, because thinking is
-produced *in addition to* the visible answer rather than carved out of it:
-
-```
-total = visible / (1 − thinking_share)
-```
-
-Priors were learned at the default effort, so `medium` is 1.0× and `max` works
-out around 3× the output tokens — and the cost moves with it.
-
-### Estimating a prompt
-
-Input size is measured directly. Output length and turn count are genuinely
-uncertain, so PromptMeter predicts a **band** (typical and worst case), never a
-single number.
-
-The thing that actually blows budgets is neither: an agent re-sends the whole
-conversation on every turn, so input cost grows **quadratically in turn count**. A
-"20k prompt" that runs 30 turns is a $10 request, not a $0.13 one. Turn count is
-the variable the estimator predicts hardest.
-
-### Risk
-
-Risk here has a real definition: **the probability this run hits a wall** — the
-tail of the predicted cost distribution above what's left in your window. It's a
-number you can check, and the History screen checks it.
-
-The score names its drivers rather than just showing a colour. In practice the
-big four are: no turn cap, shell access, no acceptance criteria, and open-ended
-wording ("keep going until it works"). Runaway features are scaled by how much
-room the task has to run away in — a two-turn question can't overrun no matter
-how loosely it's worded.
-
-### Scope — why a todo app and a Zomato clone differ
-
-The task class says *what kind* of work it is; scope says *how much*. Scope is
-counted from the prompt: subsystems named (payments, auth, tracking, admin),
-platforms, data entities, listed requirements, third-party integrations, and
-whether it names a product to clone. That becomes a multiplier on the turn
-prediction, so `build a todo app` lands around 0.5× and a food-delivery app with
-payments, tracking, a dashboard and a mobile client lands above 1.2×.
-
-**Optionally, a model can draft the plan instead.** On the Setup page pick
-Ollama (local, free, no key), or paste a Claude / OpenAI / Gemini key. Scope is
-then derived from the drafted step list and its complexity ratings, and those
-steps become the split. The important rule: **the model never sets a price.** It
-enumerates the work; PromptMeter costs it with its own numbers, which stay
-checkable against your history. Keys are stored in your local database, sent
-only to that provider, and never shown back to the page in full.
-
-Leave the method on **Built-in** and nothing changes — no key, no network, no cost.
-
-### Splitting — and when not to
-
-**Splitting a prompt does not save money by itself.** Each step re-sends its own
-context. PromptMeter splits only when it helps, and tells you which of three
-things is paying for it:
-
-- **less context re-sent per turn** — short steps avoid the quadratic growth (usually the largest)
-- **cheaper models on the simple steps** — boilerplate goes to Haiku
-- **each step carries only what it touches**
-
-Every line in that table is a separate real estimate, so the numbers reconcile.
-If the split comes out *more* expensive, the app says so and tells you the only
-two reasons left to do it anyway: it fits inside your window, and a step that
-goes wrong costs one step's budget instead of the whole run's.
-
-Set **Splitting → Never split** to run the whole thing as one step.
-
-### Steps, iterations and the step graph
-
-A project is a graph of steps. Each step has a prompt, a model, a budget, an
-iteration cap, and a **deliverable check**. Log what each pass did and PromptMeter
-tracks progress against the budget and stops you when a guard trips.
-
-The **step graph** shows which prompt produced what, laid out in dependency
-order. The dot on each card is the deliverable verdict; the bar is progress.
-
-### Deliverable checks — the loop without a model
-
-The iteration loop stops on a machine-checkable condition, not on a model's
-opinion:
-
-| Check | Passes when |
-|---|---|
-| File exists | the file is there and not empty |
-| Command exits 0 | your command succeeds |
-| Test suite passes | `pytest` / `npm test` / `go test` returns 0 |
-| Valid JSON | the file parses |
-| Contains | `path/to/file.txt::pattern` matches |
-| No progress | output stopped changing — the loop has converged |
-| Manual | you decide |
-
-When you don't name a deliverable, one is derived from the task type — not
-invented by a model. Three universal stops are always on: iteration cap, budget
-cap, and no-progress.
-
-### High-risk steps resume instead of restarting
-
-On a red or critical step, every summary you log is folded into the next prompt
-under *"work already completed — do not redo the items above"*, along with the
-iteration cap and the acceptance check. An interrupted run picks up where it
-stopped instead of starting over. That's what the **Copy prompt** button gives
-you.
-
-### Learning
-
-Every logged iteration feeds back. Task-class predictions start from built-in
-priors and shift toward your own numbers as runs accumulate (shrinkage weighting,
-so two samples stay near the prior and fifty drive it). The History screen shows
-what it has learned per model and per task type, and how often the estimates
-landed inside the band.
+Set `PROMPTMETER_HOME` to move the database somewhere other than
+`~/.promptmeter`.
 
 ---
 
@@ -379,41 +247,6 @@ landed inside the band.
 - **`/clear` costs nothing. `/compact` doesn't** — compacting a large context is
   itself a large request.
 
----
-
-## Reading the code
-
-Each folder documents itself:
-
-| Folder | Read | For |
-|---|---|---|
-| `promptmeter/` | [`promptmeter/README.md`](promptmeter/README.md) | Every module, in dependency order |
-| `promptmeter/data/` | [`data/README.md`](promptmeter/data/README.md) | The JSON tables you can tune |
-| `web/` | [`web/README.md`](web/README.md) | How the screens are built |
-| `shim/` | [`shim/README.md`](shim/README.md) | The live-meter bridge |
-
-For the algorithms and formulas behind it all, read
-[`ARCHITECTURE.md`](ARCHITECTURE.md). For the known faults and what is still
-outstanding, read [`PLS-DO.md`](PLS-DO.md).
-
-**Your data:** `~/.promptmeter/promptmeter.db` (Windows:
-`C:\Users\you\.promptmeter\`). One SQLite file. Delete the folder to reset.
-Set `PROMPTMETER_HOME` to put it elsewhere.
-
-Run on another port with `python -m promptmeter --port 7788`, and `--no-browser`
-to skip opening one.
-
----
-
-## Accuracy, honestly
-
-- Chat and Cowork usage counts against the same windows and PromptMeter can't
-  attribute it — but the percentages it reads already include it, so the ledger
-  self-corrects at every reading. The gap shows up as *"usage outside your
-  projects"*.
-- `/usage` is computed from local history on one machine; other devices and
-  claude.ai aren't in it. Same correction applies.
-- There's no official offline tokenizer, so input counts are a heuristic that
-  calibrates itself against observed usage.
-- Capacity fitting assumes metering is roughly proportional to list price. If
-  that stops holding, the confidence label and the residuals will show it.
+For everything else — how the estimator actually works, the data files you can
+tune, the frontend's design system, and the project's known issues — read
+**[`ARCHITECTURE.md`](ARCHITECTURE.md)**.

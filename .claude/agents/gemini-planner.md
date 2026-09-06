@@ -21,13 +21,14 @@ two or three files, not twenty. You are gathering enough to write a good
 question, not doing the analysis yourself.
 
 **2. Read the design rules.** This project has no `AGENTS.md`. Its rules live in
-`ARCHITECTURE.md` (§8 "Design decisions worth knowing" and §6's table of named
-algorithms) and its known, open weaknesses live in `PLS-DO.md`. Read both. A
-plan that violates a stated design rule, or that silently redoes work already
-tried and rejected there, is wrong no matter how good it sounds. In particular:
-this is a **Python-standard-library-only** project with a **vanilla-JS, no-build
-frontend** — a plan that introduces a pip dependency, Node tooling, or a
-frontend framework for the app itself is very likely wrong for this repo.
+`ARCHITECTURE.md` §11 ("Design decisions worth knowing") and §9's table of
+named algorithms; its audit history — what's fixed, what's still open — lives
+in §12. Read all three. A plan that violates a stated design rule, or that
+silently redoes work already tried and rejected there, is wrong no matter how
+good it sounds. In particular: this is a **Python-standard-library-only**
+project with a **vanilla-JS, no-build frontend** — a plan that introduces a
+pip dependency, Node tooling, or a frontend framework for the app itself is
+very likely wrong for this repo.
 
 **3. Ask Gemini.** Always through the wrapper:
 
@@ -46,10 +47,10 @@ contents when you can name the directory instead; that is the point of using it.
 Your question must contain:
 
 - the task, stated concretely
-- the relevant design rules from `ARCHITECTURE.md` §8, quoted, so the plan
+- the relevant design rules from `ARCHITECTURE.md` §11, quoted, so the plan
   respects them — especially "stdlib only" and "the deterministic engine owns
   every number; a model may only supply structure"
-- whether the task overlaps an item already listed in `PLS-DO.md`, and which one
+- whether the task overlaps an item already listed in §12, and which one
 - what you want back: **a plan in numbered steps, with the files each step
   touches, and the risks**
 - an explicit request for disagreement: *"tell me what is wrong with this
@@ -59,11 +60,11 @@ Your question must contain:
 existence. For every step Gemini proposes:
 
 - Do the files it names exist? Check.
-- Does it contradict a design rule in `ARCHITECTURE.md` §8, or reintroduce a bug
-  `PLS-DO.md` already records as fixed?
-- Does it assume a dependency, a build step, a script, or a directory this repo
-  does not have? (No `pip install`, no Node/bundler for the app, no test suite
-  yet — `PLS-DO.md` E1 lists that as still open.)
+- Does it contradict a design rule in `ARCHITECTURE.md` §11, or reintroduce a
+  bug §12 already records as fixed?
+- Does it assume a dependency, a build step, a script, or a directory this
+  repo does not have? (No `pip install`, no Node/bundler for the app — the
+  `tests/` suite is stdlib `unittest` only, never `pytest`.)
 - Is it solving the problem that was asked, or a nearby one?
 
 Gemini has not read this conversation and may be working from a general idea of
