@@ -695,6 +695,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def serve(host: str = "127.0.0.1", port: int = 7777) -> None:
+    providers.load_dotenv()
     db.init()
     watcher.init()
     watcher.start()

@@ -101,6 +101,9 @@ const STATUS_COLOR = {
 // its colour, so a filter that removes one never repaints the others.
 const TIER_COLOR = { opus: 'var(--series-1)', sonnet: 'var(--series-2)', haiku: 'var(--series-3)' };
 
+// Matches providers.ENV_KEYS on the Python side — display only.
+const ENV_KEY_NAMES = { anthropic: 'ANTHROPIC_API_KEY', openai: 'OPENAI_API_KEY', gemini: 'GEMINI_API_KEY' };
+
 function modelColor(id) {
   const m = S.models.find(x => x.id === id);
   return TIER_COLOR[m && m.tier] || 'var(--series-4)';
@@ -1506,24 +1509,33 @@ async function viewSetup() {
       ${pv.active === 'ollama'
         ? `<div class="field"><label>Ollama address</label>
              <input id="prov-url" value="${esc(pv.base_url || 'http://localhost:11434')}"></div>`
-        : `<div class="field"><label>API key${pv.keys[pv.active] ? ' — saved' : ''}</label>
+        : `<div class="field"><label>API key${
+             (pv.key_storage || {})[pv.active] === 'environment' ? ' — from .env'
+             : pv.keys[pv.active] ? ' — saved' : ''}</label>
              <input id="prov-key" type="password" placeholder="${pv.keys[pv.active] ? esc(pv.keys[pv.active]) : 'paste your key'}"></div>`}
     </div>
     <div class="row">
       <button class="btn-primary" onclick="saveProvider()">Save</button>
       <button onclick="testProvider()">Test it</button>
-      ${pv.keys[pv.active] ? `<button class="btn-danger" onclick="clearKey()">Remove key</button>` : ''}
+      ${pv.keys[pv.active] && (pv.key_storage || {})[pv.active] !== 'environment'
+        ? `<button class="btn-danger" onclick="clearKey()">Remove key</button>` : ''}
     </div>
+    ${(pv.key_storage || {})[pv.active] === 'environment' ? `<div class="small muted mt8">
+      Using ${esc(ENV_KEY_NAMES[pv.active] || 'a key')} from your <span class="mono">.env</span> file.
+      Paste a key above and Save to override it just here.</div>` : ''}
     <div id="prov-test" class="mt12"></div>
     ${pv.active === 'ollama' ? `<div class="banner mt12">
       <strong>Getting Ollama.</strong> Install it from <span class="mono">ollama.com</span>, then in
       PowerShell run <span class="mono">ollama pull ${esc(pv.model || 'llama3.2:3b')}</span>. It runs
       on your own machine — no key, no cost, and nothing leaves the PC. A 3B model needs roughly 4 GB
       of free RAM.</div>` : `<div class="banner mt12">
-      <strong>Where the key goes.</strong> Stored in your local database at
-      <span class="mono">~/.promptmeter</span> and sent only to ${esc(pv.active)}. It is never shown
-      back to this page in full and never leaves your machine otherwise. Drafting one plan costs a
-      fraction of a cent.</div>`}
+      <strong>Where the key goes.</strong> A key you paste here is stored in your local database
+      at <span class="mono">~/.promptmeter</span>${pv.dpapi_available ? ', encrypted at rest' : ''}
+      and sent only to ${esc(pv.active)}. It is never shown back to this page in full and never
+      leaves your machine otherwise. You can also set
+      <span class="mono">${esc(ENV_KEY_NAMES[pv.active] || '')}</span> in a
+      <span class="mono">.env</span> file instead — a key pasted here always takes priority over
+      that. Drafting one plan costs a fraction of a cent.</div>`}
     `}
 
     <label class="row mt16" style="gap:8px;cursor:pointer">

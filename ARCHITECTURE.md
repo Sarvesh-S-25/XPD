@@ -632,7 +632,23 @@ clamp complexity to 1–5.
 
 **Key handling.** Stored in `settings`; `public_config()` masks to
 `sk-ope…3456` and the full key is never returned to the browser. A masked value
-echoed back is ignored rather than saved as the key. As of September 2026,
+echoed back is ignored rather than saved as the key.
+
+**`.env` fallback (September 2026).** `load_dotenv()` is a ~15-line stdlib-only
+parser (no `pip install python-dotenv`) called once at `server.serve()`
+startup — reads `KEY=VALUE` lines from a `.env` at the project root into
+`os.environ`, skipping comments/blanks, never overwriting a variable the real
+environment already set. `config()` then falls back to
+`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`/`GEMINI_API_KEY` only for a provider with
+nothing saved in `settings` — a key pasted into the Setup page always wins,
+and removing that saved key reveals the `.env` value again rather than
+requiring you to re-paste it. `public_config()`'s `key_storage` reports
+`"environment"` for a key sourced this way, distinct from `"encrypted"` /
+`"plaintext"` / `"unreadable"`, so the Setup page never claims a `.env`-backed
+key is protected by DPAPI when it isn't. See `.env.example` at the project
+root.
+
+As of September 2026,
 `save_config()`/`config()` are split deliberately: `config()` decrypts for
 internal use (calling a provider's API), `save_config()` reads and writes the
 *raw* stored dict directly rather than round-tripping through `config()` —

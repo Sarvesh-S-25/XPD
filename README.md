@@ -23,6 +23,7 @@ p-deliverible/
 ├── start.bat            ← double-click this to run the app        (Windows)
 ├── start.sh             ← same thing                              (macOS / Linux)
 ├── connect-meter.bat    ← optional: connect the live usage meter  (Windows)
+├── .env.example         ← optional: a plan-drafting provider's API key
 │
 ├── promptmeter/         THE ENGINE — all the logic, pure Python
 │   └── data/              prices, plan sizes, task priors — edit these
@@ -230,6 +231,14 @@ Windows users can double-click `connect-meter.bat` instead of `--connect`.
 
 Set `PROMPTMETER_HOME` to move the database somewhere other than
 `~/.promptmeter`.
+
+**Optional: a plan-drafting provider's key.** Copy `.env.example` to `.env`
+and fill in whichever key you want (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
+`GEMINI_API_KEY`) — this is only used if you also pick that provider on
+**Setup → Connect a provider**, and only for having it draft your prompt's
+step list; every model's cost/token estimate works with no key at all. A key
+pasted into the Setup page itself always takes priority over `.env`. `.env`
+is git-ignored; never commit it.
 
 ---
 

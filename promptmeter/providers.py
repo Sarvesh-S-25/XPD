@@ -16,14 +16,51 @@ Only stdlib. urllib for HTTP, no SDKs to install.
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 from . import db, dpapi
 
 TIMEOUT = 60
+
+# One environment variable per provider that needs a key — a fallback for
+# when nothing is saved via the Setup page yet (a fresh clone, or after
+# "Erase everything"). A key saved on the Setup page always wins over this.
+ENV_KEYS = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "gemini": "GEMINI_API_KEY",
+}
+
+
+def load_dotenv(path: Path | None = None) -> None:
+    """Stdlib-only .env loader — no `pip install python-dotenv`, keeping the
+    project's zero-install promise. Reads KEY=VALUE lines from a `.env` file
+    (project root by default) into `os.environ`, without overwriting a
+    variable the real environment already set (an actual env var always wins
+    over the file). Call once, at process start (`server.serve()`). A missing
+    or unreadable file is not an error — this is a convenience, never a
+    requirement, so it fails silently rather than crashing the app.
+    """
+    path = path or (Path(__file__).resolve().parent.parent / ".env")
+    try:
+        if not path.is_file():
+            return
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except OSError:
+        pass
 
 SYSTEM = (
     "You break a software request into the concrete pieces of work it implies. "
@@ -96,11 +133,17 @@ def _key_storage(entry) -> str:
 def config() -> dict:
     c = db.get_setting("provider_config") or {}
     raw_keys = c.get("keys", {})
+    keys = {k: _decrypt_key(v) for k, v in raw_keys.items()}
+    for provider, env_name in ENV_KEYS.items():
+        if not keys.get(provider):
+            env_val = os.environ.get(env_name)
+            if env_val:
+                keys[provider] = env_val.strip()
     return {
         "active": c.get("active", "heuristic"),
         "model": c.get("model", ""),
         "base_url": c.get("base_url", "http://localhost:11434"),
-        "keys": {k: _decrypt_key(v) for k, v in raw_keys.items()},
+        "keys": keys,
         "auto": bool(c.get("auto", False)),  # plan every prompt, or only on request
     }
 
@@ -109,19 +152,28 @@ def public_config() -> dict:
     """Same, but keys masked — the UI never receives a full key."""
     c = config()
     raw_keys = (db.get_setting("provider_config") or {}).get("keys", {})
+    key_storage = {}
+    for provider, value in c["keys"].items():
+        if not value:
+            continue
+        raw = raw_keys.get(provider)
+        if raw:
+            # per key: "encrypted" (DPAPI), "plaintext" (no OS keychain here,
+            # or a key stored before this existed), or "unreadable" (an
+            # encrypted entry exists but this machine/user can't decrypt it —
+            # DPAPI keys aren't portable; re-entering the key is the only fix).
+            key_storage[provider] = ("unreadable" if isinstance(raw, dict)
+                                     and "enc" in raw and not value
+                                     else _key_storage(raw))
+        else:
+            # Nothing saved via the Setup page — this value came from .env /
+            # the real environment (ENV_KEYS in config()) instead.
+            key_storage[provider] = "environment"
     return {
         "active": c["active"], "model": c["model"], "base_url": c["base_url"],
         "auto": c["auto"],
         "keys": {k: _mask(v) for k, v in c["keys"].items() if v},
-        # per key: "encrypted" (DPAPI), "plaintext" (no OS keychain here, or a
-        # key stored before this existed), or "unreadable" (an encrypted
-        # entry exists but this machine/user can't decrypt it — DPAPI keys
-        # aren't portable; re-entering the key is the only fix).
-        "key_storage": {
-            k: ("unreadable" if isinstance(v, dict) and "enc" in v and not c["keys"].get(k)
-                else _key_storage(v))
-            for k, v in raw_keys.items() if v
-        },
+        "key_storage": key_storage,
         "dpapi_available": dpapi.AVAILABLE,
         "registry": [{"id": k, **v} for k, v in REGISTRY.items()],
     }

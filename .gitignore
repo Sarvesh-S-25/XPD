@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+
+# The app's own database — never belongs in the repo, it's per-user data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Secrets — see the note in README.md; provider keys normally live in the
+# encrypted local database via the Setup page, not a file, but this covers
+# anyone who does add one
+.env
+.env.*
+!.env.example
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Claude Code local session state — never shared
+.claude/settings.local.json
