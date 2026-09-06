@@ -1,0 +1,17 @@
+{
+  "pro": {
+    "label": "Pro",
+    "usd_per_5h": 6.0,
+    "usd_per_week": 48.0
+  },
+  "max5": {
+    "label": "Max 5x",
+    "usd_per_5h": 30.0,
+    "usd_per_week": 240.0
+  },
+  "max20": {
+    "label": "Max 20x",
+    "usd_per_5h": 120.0,
+    "usd_per_week": 960.0
+  }
+}

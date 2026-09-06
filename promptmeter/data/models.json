@@ -1,0 +1,287 @@
+{
+  "claude-opus-5": {
+    "vendor": "anthropic",
+    "label": "Claude Opus 5",
+    "tier": "opus",
+    "in": 5.0,
+    "out": 25.0,
+    "cache_read": 0.1,
+    "cache_write_1h": 2.0,
+    "cache_write_5m": 1.25,
+    "context": 1000000,
+    "max_output": 128000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.15,
+      "medium": 0.35,
+      "high": 0.6,
+      "max": 0.78
+    }
+  },
+  "claude-sonnet-5": {
+    "vendor": "anthropic",
+    "label": "Claude Sonnet 5",
+    "tier": "sonnet",
+    "in": 2.0,
+    "out": 10.0,
+    "cache_read": 0.1,
+    "cache_write_1h": 2.0,
+    "cache_write_5m": 1.25,
+    "context": 1000000,
+    "max_output": 128000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.15,
+      "medium": 0.35,
+      "high": 0.6,
+      "max": 0.78
+    }
+  },
+  "claude-haiku-4-5": {
+    "vendor": "anthropic",
+    "label": "Claude Haiku 4.5",
+    "tier": "haiku",
+    "in": 1.0,
+    "out": 5.0,
+    "cache_read": 0.1,
+    "cache_write_1h": 2.0,
+    "cache_write_5m": 1.25,
+    "context": 200000,
+    "max_output": 32000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.1,
+      "medium": 0.25,
+      "high": 0.45,
+      "max": 0.6
+    }
+  },
+  "claude-sonnet-4-6": {
+    "vendor": "anthropic",
+    "label": "Claude Sonnet 4.6",
+    "tier": "sonnet",
+    "in": 3.0,
+    "out": 15.0,
+    "cache_read": 0.1,
+    "cache_write_1h": 2.0,
+    "cache_write_5m": 1.25,
+    "context": 1000000,
+    "max_output": 64000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.15,
+      "medium": 0.35,
+      "high": 0.6,
+      "max": 0.78
+    }
+  },
+  "claude-fable-5": {
+    "vendor": "anthropic",
+    "label": "Claude Fable 5",
+    "tier": "opus",
+    "in": 10.0,
+    "out": 50.0,
+    "cache_read": 0.1,
+    "cache_write_1h": 2.0,
+    "cache_write_5m": 1.25,
+    "context": 1000000,
+    "max_output": 128000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.15,
+      "medium": 0.35,
+      "high": 0.6,
+      "max": 0.78
+    }
+  },
+  "gpt-5.6-sol": {
+    "vendor": "openai",
+    "label": "GPT-5.6 Sol",
+    "tier": "opus",
+    "in": 2.0,
+    "out": 10.0,
+    "cache_read": 0.1,
+    "cache_write_1h": 1.0,
+    "cache_write_5m": 1.0,
+    "context": 1050000,
+    "max_output": 128000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.15,
+      "medium": 0.35,
+      "high": 0.6,
+      "max": 0.78
+    }
+  },
+  "gpt-5.6-terra": {
+    "vendor": "openai",
+    "label": "GPT-5.6 Terra",
+    "tier": "sonnet",
+    "in": 1.0,
+    "out": 6.0,
+    "cache_read": 0.1,
+    "cache_write_1h": 1.0,
+    "cache_write_5m": 1.0,
+    "context": 1050000,
+    "max_output": 128000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.15,
+      "medium": 0.35,
+      "high": 0.6,
+      "max": 0.78
+    }
+  },
+  "gpt-5.6-luna": {
+    "vendor": "openai",
+    "label": "GPT-5.6 Luna",
+    "tier": "haiku",
+    "in": 0.1,
+    "out": 0.6,
+    "cache_read": 0.1,
+    "cache_write_1h": 1.0,
+    "cache_write_5m": 1.0,
+    "context": 1050000,
+    "max_output": 128000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.1,
+      "medium": 0.25,
+      "high": 0.45,
+      "max": 0.6
+    }
+  },
+  "gpt-5.3-codex": {
+    "vendor": "openai",
+    "label": "GPT-5.3 Codex",
+    "tier": "sonnet",
+    "in": 1.75,
+    "out": 14.0,
+    "cache_read": 0.1,
+    "cache_write_1h": 1.0,
+    "cache_write_5m": 1.0,
+    "context": 400000,
+    "max_output": 128000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.15,
+      "medium": 0.35,
+      "high": 0.6,
+      "max": 0.78
+    }
+  },
+  "gemini-3.1-pro": {
+    "vendor": "google",
+    "label": "Gemini 3.1 Pro",
+    "tier": "opus",
+    "in": 2.0,
+    "out": 12.0,
+    "cache_read": 0.1,
+    "cache_write_1h": 1.0,
+    "cache_write_5m": 1.0,
+    "context": 1000000,
+    "max_output": 64000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.15,
+      "medium": 0.35,
+      "high": 0.6,
+      "max": 0.78
+    },
+    "long_context": {
+      "threshold": 200000,
+      "in": 4.0,
+      "out": 18.0
+    }
+  },
+  "gemini-3.7-flash": {
+    "vendor": "google",
+    "label": "Gemini 3.7 Flash",
+    "tier": "sonnet",
+    "in": 0.75,
+    "out": 3.75,
+    "cache_read": 0.1,
+    "cache_write_1h": 1.0,
+    "cache_write_5m": 1.0,
+    "context": 1000000,
+    "max_output": 64000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.1,
+      "medium": 0.25,
+      "high": 0.45,
+      "max": 0.6
+    }
+  },
+  "gemini-3.5-flash": {
+    "vendor": "google",
+    "label": "Gemini 3.5 Flash",
+    "tier": "sonnet",
+    "in": 1.5,
+    "out": 9.0,
+    "cache_read": 0.1,
+    "cache_write_1h": 1.0,
+    "cache_write_5m": 1.0,
+    "context": 1000000,
+    "max_output": 64000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.1,
+      "medium": 0.25,
+      "high": 0.45,
+      "max": 0.6
+    }
+  },
+  "gemini-3.1-flash-lite": {
+    "vendor": "google",
+    "label": "Gemini 3.1 Flash-Lite",
+    "tier": "haiku",
+    "in": 0.25,
+    "out": 1.5,
+    "cache_read": 0.1,
+    "cache_write_1h": 1.0,
+    "cache_write_5m": 1.0,
+    "context": 1000000,
+    "max_output": 64000,
+    "thinking": true,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.1,
+      "medium": 0.25,
+      "high": 0.45,
+      "max": 0.6
+    }
+  },
+  "local-model": {
+    "vendor": "local",
+    "label": "Local model (free)",
+    "tier": "haiku",
+    "in": 0.0,
+    "out": 0.0,
+    "cache_read": 0.0,
+    "cache_write_1h": 0.0,
+    "cache_write_5m": 0.0,
+    "context": 128000,
+    "max_output": 8000,
+    "thinking": false,
+    "thinking_share": {
+      "none": 0.0,
+      "low": 0.0,
+      "medium": 0.0,
+      "high": 0.0,
+      "max": 0.0
+    }
+  }
+}

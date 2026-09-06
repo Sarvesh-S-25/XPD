@@ -1,0 +1,462 @@
+/* PromptMeter — an instrument, not a SaaS dashboard.
+
+   The subject is a meter: a precise readout of what work costs, built for an
+   engineer who wants trustworthy numbers over marketing polish. That's where
+   the identity comes from — tabular/mono numerals standing in for a digital
+   readout, a signal-teal accent distinct from the categorical data colours,
+   flat panel surfaces with no drop shadows (a gauge is flat-mounted, not
+   floating), and a radius scale with real hierarchy instead of one rounded
+   corner applied to everything.
+
+   --series-1..4 and --good/--warning/--serious/--critical are the validated,
+   colour-blind-checked reference palette — categorical data colour and status
+   colour respectively. Never repurpose them as decoration or brand colour;
+   that's what --accent is for. Roles are declared once; light/dark swap here. */
+
+:root {
+  color-scheme: light;
+  --surface-1: #fdfdfc;
+  --page: #f1f2ee;
+  --text-primary: #12181f;
+  --text-secondary: #4c5560;
+  --text-muted: #868f97;
+  --grid: #dfe1db;
+  --baseline: #c2c6bd;
+  --border: rgba(18, 24, 31, 0.12);
+  --raise: rgba(18, 24, 31, 0.045);
+
+  /* Signal colour for interactive chrome — buttons, links, focus, the active
+     nav item. Deliberately not --series-1: that blue means "Opus tier" on a
+     model chip, and reusing it as the app's own brand colour made the two
+     meanings collide. This is a precision-instrument teal instead, chosen to
+     sit clear of every status/series hue already in use. */
+  --accent: #178077;
+  --accent-ink: #ffffff;
+
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+
+  --track: #cde2fb;          /* lighter step of the blue ramp */
+  --track-warm: #e9e8e1;
+
+  --good: #0ca30c;
+  --warning: #fab219;
+  --serious: #ec835a;
+  --critical: #d03b3b;
+  --success-text: #006300;
+  /* Wash backgrounds for .chip.warning/.chip.serious — without these the two
+     chips were visually near-identical (same text colour, only the swatch
+     dot differed), an easy-to-miss distinction between "moderate" and
+     "high" risk. */
+  --warning-bg: #fef3d9;
+  --serious-bg: #fbe0d5;
+
+  /* Radius hierarchy, not one value applied everywhere: panels get more
+     room to breathe, controls stay tight and precise. */
+  --r: 12px;
+  --r-sm: 6px;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-1: #141a20;
+    --page: #0b0f13;
+    --text-primary: #edf0f2;
+    --text-secondary: #b7c0c7;
+    --text-muted: #78838b;
+    --grid: #232b32;
+    --baseline: #333e46;
+    --border: rgba(237, 240, 242, 0.10);
+    --raise: rgba(237, 240, 242, 0.045);
+    --accent: #3fe0cc;
+    --accent-ink: #06201c;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    /* Darkest step of the blue ramp. A mid step here reads as a *filled* bar
+       against the dark surface, which makes an empty meter look full. */
+    --track: #0d366b;
+    --track-warm: #232b32;
+    --success-text: #0ca30c;
+    --warning-bg: #3a2c0d;
+    --serious-bg: #3a2118;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface-1: #141a20;
+  --page: #0b0f13;
+  --text-primary: #edf0f2;
+  --text-secondary: #b7c0c7;
+  --text-muted: #78838b;
+  --grid: #232b32;
+  --baseline: #333e46;
+  --border: rgba(237, 240, 242, 0.10);
+  --raise: rgba(237, 240, 242, 0.045);
+  --accent: #3fe0cc;
+  --accent-ink: #06201c;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --track: #0d366b;
+  --track-warm: #232b32;
+  --success-text: #0ca30c;
+  --warning-bg: #3a2c0d;
+  --serious-bg: #3a2118;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  background: var(--page);
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+h1 { font-size: 22px; }
+h2 { font-size: 15px; }
+h3 { font-size: 13px; }
+p { margin: 0 0 10px; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.001ms !important; animation-duration: 0.001ms !important; }
+}
+
+/* ------------------------------------------------------------ layout */
+
+.app { display: flex; min-height: 100vh; }
+
+.sidebar {
+  width: 216px; flex: 0 0 216px;
+  background: var(--surface-1);
+  border-right: 1px solid var(--border);
+  border-top: 2px solid var(--accent);
+  padding: 20px 12px;
+  display: flex; flex-direction: column; gap: 2px;
+  position: sticky; top: 0; height: 100vh;
+}
+
+.brand { padding: 2px 10px 18px; display: flex; align-items: center; gap: 9px; }
+.brand-mark {
+  width: 24px; height: 24px; border-radius: var(--r-sm);
+  background: var(--accent); flex: 0 0 24px;
+  display: grid; place-items: center;
+  color: var(--accent-ink); font-size: 12px; font-weight: 700;
+  font-family: var(--mono);
+}
+.brand small { display: block; color: var(--text-muted); font-size: 11px; font-weight: 400; }
+
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 8px 10px 8px 8px; border-radius: var(--r-sm);
+  border-left: 2px solid transparent;
+  color: var(--text-secondary); cursor: pointer;
+  font-size: 13.5px; background: none; width: 100%; text-align: left;
+  font-family: inherit;
+}
+.nav-item:hover { background: var(--raise); color: var(--text-primary); }
+.nav-item.active { background: var(--raise); color: var(--text-primary); font-weight: 600;
+  border-left-color: var(--accent); }
+.nav-spacer { flex: 1; }
+
+.content-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.main { flex: 1; min-width: 0; padding: 24px 28px 64px; max-width: 1180px;
+  opacity: 1; transition: opacity .15s ease; }
+.main.loading { opacity: .55; }
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.page-head .sub { color: var(--text-secondary); font-size: 13px; margin-top: 3px; }
+
+/* -------------------------------------------------------- selection bar */
+
+#selection-bar:empty { display: none; }
+.selbar {
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  padding: 9px 28px; background: var(--surface-1); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 5;
+}
+.selbar-group { display: flex; align-items: center; gap: 7px; }
+.selbar-group label { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.selbar-group select { width: auto; padding: 5px 8px; font-size: 12.5px; min-width: 130px; }
+.selbar-hint { margin-left: auto; white-space: nowrap; }
+@media (max-width: 900px) { .selbar-hint { display: none; } }
+
+/* ------------------------------------------------------------ cards */
+
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--r);
+  padding: 16px;
+}
+.card + .card { margin-top: 14px; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.card-head .hint { color: var(--text-muted); font-size: 12px; }
+
+.grid { display: grid; gap: 14px; }
+.grid-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.grid-auto { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+@media (max-width: 900px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+
+/* ------------------------------------------------------------ text bits */
+
+.label { color: var(--text-secondary); font-size: 12px; }
+.muted { color: var(--text-muted); }
+.small { font-size: 12px; }
+.mono { font-family: var(--mono); font-size: 12px; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* Readout numerals — every headline figure in the app is a meter reading, so
+   it gets the instrument's typeface: monospaced, tabular. Prose stays in the
+   system sans even at hero size — .hero renders a sentence ("Pace is fine"),
+   not a number, and setting a sentence in the numeral face would make prose
+   look like code instead of marking out an actual reading. */
+.stat-value, .ring-meta .n {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+.hero { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+.stat-value { font-size: 21px; font-weight: 600; }
+.row { display: flex; align-items: center; gap: 8px; }
+.wrap { flex-wrap: wrap; }
+.spread { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.stack { display: flex; flex-direction: column; gap: 4px; }
+.gap12 { gap: 12px; }
+.mt8 { margin-top: 8px; } .mt12 { margin-top: 12px; } .mt16 { margin-top: 16px; }
+
+/* ------------------------------------------------------------ controls */
+
+button, .btn {
+  font-family: inherit; font-size: 13px; font-weight: 500;
+  padding: 7px 13px; border-radius: var(--r-sm);
+  border: 1px solid var(--border); background: var(--surface-1);
+  color: var(--text-primary); cursor: pointer; line-height: 1.4;
+}
+button:hover, .btn:hover { background: var(--raise); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+.btn-danger { color: var(--critical); border-color: var(--border); }
+.btn-sm { padding: 4px 9px; font-size: 12px; border-radius: 5px; }
+
+input, textarea, select {
+  font-family: inherit; font-size: 13px; width: 100%;
+  padding: 8px 10px; border-radius: var(--r-sm);
+  border: 1px solid var(--border); background: var(--page);
+  color: var(--text-primary);
+}
+textarea { resize: vertical; min-height: 96px; line-height: 1.55; }
+input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.field { margin-bottom: 12px; }
+.field > label { display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 5px; }
+
+/* ------------------------------------------------------------ chips */
+
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 3px 9px; border-radius: 999px;
+  font-size: 11.5px; font-weight: 500;
+  border: 1px solid var(--border); color: var(--text-secondary);
+  background: var(--page);
+}
+.chip .swatch { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+.chip.good     { color: var(--success-text); }
+.chip.warning  { color: var(--text-primary); background: var(--warning-bg); }
+.chip.serious  { color: var(--text-primary); background: var(--serious-bg); }
+.chip.critical { color: var(--critical); }
+
+/* ------------------------------------------------------------ meters */
+
+.meter { margin: 8px 0; }
+.meter-track {
+  height: 8px; border-radius: 999px; background: var(--track);
+  overflow: hidden; position: relative;
+}
+.meter-fill {
+  height: 100%; border-radius: 0 4px 4px 0;
+  background: var(--accent);
+  transition: width .35s ease;
+}
+.meter-fill.warning  { background: var(--warning); }
+.meter-fill.serious  { background: var(--serious); }
+.meter-fill.critical { background: var(--critical); }
+.meter-fill.good     { background: var(--good); }
+
+/* No reading yet — must not look like an empty-but-known value */
+.meter-track.unknown {
+  background: repeating-linear-gradient(
+    135deg, var(--track-warm) 0 5px, transparent 5px 10px);
+  border: 1px solid var(--border);
+  height: 8px;
+}
+.meter-legend { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-secondary); margin-top: 5px; }
+
+.progress-track {
+  height: 6px; border-radius: 999px; background: var(--track-warm); overflow: hidden;
+}
+.progress-fill { height: 100%; border-radius: 0 3px 3px 0; background: var(--accent); transition: width .35s ease; }
+.progress-fill.done { background: var(--good); }
+
+/* ------------------------------------------------------------ rings */
+
+.rings { display: flex; gap: 22px; flex-wrap: wrap; }
+.ring-card { display: flex; gap: 14px; align-items: center; }
+.ring-meta { min-width: 0; }
+.ring-meta .n { font-size: 24px; font-weight: 600; }
+
+/* ------------------------------------------------------------ tables */
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left; font-weight: 600; color: var(--text-secondary);
+  font-size: 12px;
+  padding: 0 10px 7px; border-bottom: 1px solid var(--grid); white-space: nowrap;
+}
+td { padding: 9px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+
+/* ------------------------------------------------------------ project cards */
+
+.proj {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  cursor: pointer;
+}
+.proj:hover { border-color: var(--baseline); }
+.proj .title { font-weight: 600; font-size: 14px; }
+.proj .goal { color: var(--text-secondary); font-size: 12.5px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.proj-actions { display: flex; gap: 6px; }
+
+/* ------------------------------------------------------------ steps */
+
+.step {
+  border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface-1); padding: 13px; margin-bottom: 10px;
+}
+.step.active { border-color: var(--accent); }
+.step-head { display: flex; align-items: flex-start; gap: 10px; justify-content: space-between; }
+.step-num {
+  width: 22px; height: 22px; border-radius: var(--r-sm); flex: 0 0 22px;
+  background: var(--page); border: 1px solid var(--border);
+  display: grid; place-items: center; font-size: 11px; font-weight: 600;
+  font-family: var(--mono);
+  color: var(--text-secondary);
+}
+.step-body { display: none; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--grid); }
+.step.open .step-body { display: block; }
+
+.prompt-box {
+  font-family: var(--mono); font-size: 12px; line-height: 1.6;
+  background: var(--page); border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: 10px 12px; white-space: pre-wrap; word-break: break-word;
+  max-height: 260px; overflow: auto;
+}
+
+.iter {
+  display: flex; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--grid);
+}
+.iter:last-child { border-bottom: 0; }
+.iter-n {
+  width: 20px; height: 20px; border-radius: 50%; flex: 0 0 20px;
+  background: var(--accent); color: var(--accent-ink); font-size: 10px; font-weight: 600;
+  font-family: var(--mono);
+  display: grid; place-items: center; margin-top: 2px;
+}
+.iter-n.pass { background: var(--good); color: #fff; }
+.iter-n.fail { background: var(--critical); color: #fff; }
+
+/* ------------------------------------------------------------ graph */
+
+.graph-wrap { overflow: auto; border: 1px solid var(--border); border-radius: var(--r);
+  background: var(--surface-1); padding: 14px; }
+.gnode { cursor: pointer; }
+.gnode rect { transition: stroke .15s; }
+.gnode:hover rect { stroke: var(--accent); }
+
+/* ------------------------------------------------------------ misc */
+
+.banner {
+  border: 1px solid var(--border); border-left: 3px solid var(--accent);
+  background: var(--surface-1); border-radius: var(--r-sm); padding: 11px 13px; font-size: 13px;
+}
+.banner.warning  { border-left-color: var(--warning); }
+.banner.critical { border-left-color: var(--critical); }
+.banner.good     { border-left-color: var(--good); }
+
+.empty { text-align: center; padding: 46px 20px; color: var(--text-secondary); }
+.empty .big { font-size: 15px; color: var(--text-primary); margin-bottom: 6px; font-weight: 600; }
+
+.toast {
+  position: fixed; right: 20px; bottom: 20px; z-index: 50;
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-left: 3px solid var(--good);
+  border-radius: var(--r-sm); padding: 11px 15px; font-size: 13px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.10); max-width: 380px;
+}
+.toast.err { border-left-color: var(--critical); }
+
+.modal-bg {
+  position: fixed; inset: 0; background: rgba(0,0,0,.42); z-index: 40;
+  display: grid; place-items: center; padding: 20px;
+}
+.modal {
+  background: var(--surface-1); border: 1px solid var(--border);
+  border-radius: var(--r); padding: 20px; width: min(640px, 100%);
+  max-height: 86vh; overflow: auto;
+}
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--grid); margin-bottom: 14px; }
+.tab {
+  padding: 7px 12px; font-size: 13px; cursor: pointer; border: 0; background: none;
+  color: var(--text-secondary); font-family: inherit;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.tab.active { color: var(--text-primary); border-bottom-color: var(--accent); font-weight: 500; }
+
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); }
+.legend .k { display: flex; align-items: center; gap: 6px; }
+.legend .sw { width: 10px; height: 10px; border-radius: 3px; }
+
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 12.5px; }
+.kv dt { color: var(--text-secondary); }
+.kv dd { margin: 0; font-variant-numeric: tabular-nums; font-family: var(--mono); }
+
+.driver { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; }
+.driver .bar { height: 5px; border-radius: 3px; background: var(--serious); flex: 0 0 auto; }
+
+details summary { cursor: pointer; font-size: 12.5px; color: var(--text-secondary); padding: 4px 0; }
+details[open] summary { margin-bottom: 8px; }
+
+/* numbered setup steps */
+.steps-num { display: flex; flex-direction: column; gap: 2px; }
+.stepn {
+  display: flex; gap: 14px; align-items: flex-start;
+  padding: 16px 0; border-bottom: 1px solid var(--grid);
+}
+.stepn:last-child { border-bottom: 0; padding-bottom: 4px; }
+.stepn-n {
+  width: 26px; height: 26px; flex: 0 0 26px; border-radius: 50%;
+  background: var(--accent); color: var(--accent-ink);
+  font-family: var(--mono);
+  display: grid; place-items: center; font-size: 13px; font-weight: 600;
+}

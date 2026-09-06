@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PromptMeter</title>
+<link rel="stylesheet" href="/styles.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%232a78d6'/><text x='16' y='23' font-size='19' font-family='sans-serif' font-weight='700' fill='white' text-anchor='middle'>P</text></svg>">
+</head>
+<body>
+<div class="app">
+  <nav class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">P</div>
+      <div>
+        <div style="font-weight:600">PromptMeter</div>
+        <small id="brand-tagline">local &middot; no API key</small>
+      </div>
+    </div>
+    <button class="nav-item" data-route="dashboard">Windows</button>
+    <button class="nav-item" data-route="plan">Plan a prompt</button>
+    <button class="nav-item" data-route="projects">Projects</button>
+    <button class="nav-item" data-route="history">History</button>
+    <button class="nav-item" data-route="setup">Setup</button>
+    <div class="nav-spacer"></div>
+    <div id="side-meter" class="small muted" style="padding:0 10px"></div>
+    <button class="nav-item" id="theme-toggle" style="margin-top:8px">Toggle theme</button>
+  </nav>
+  <div class="content-pane">
+    <header id="selection-bar"></header>
+    <main class="main" id="view"></main>
+  </div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

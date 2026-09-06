@@ -1,0 +1,79 @@
+{
+  "qa_explain": {
+    "label": "Q&A / explain",
+    "turns": [
+      1,
+      2
+    ],
+    "out": [
+      700,
+      2500
+    ]
+  },
+  "single_file_edit": {
+    "label": "Single-file edit",
+    "turns": [
+      3,
+      8
+    ],
+    "out": [
+      900,
+      3000
+    ]
+  },
+  "multi_file_feature": {
+    "label": "Multi-file feature",
+    "turns": [
+      12,
+      40
+    ],
+    "out": [
+      1200,
+      4000
+    ]
+  },
+  "build_app": {
+    "label": "Build an app",
+    "turns": [
+      35,
+      120
+    ],
+    "out": [
+      1500,
+      5000
+    ]
+  },
+  "research_report": {
+    "label": "Research + report",
+    "turns": [
+      15,
+      45
+    ],
+    "out": [
+      2000,
+      8000
+    ]
+  },
+  "refactor": {
+    "label": "Repo-wide refactor",
+    "turns": [
+      25,
+      90
+    ],
+    "out": [
+      1000,
+      3500
+    ]
+  },
+  "data_task": {
+    "label": "Data / spreadsheet",
+    "turns": [
+      8,
+      25
+    ],
+    "out": [
+      1100,
+      3500
+    ]
+  }
+}
