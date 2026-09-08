@@ -17,17 +17,25 @@
         <small id="brand-tagline">local &middot; no API key</small>
       </div>
     </div>
-    <button class="nav-item" data-route="dashboard">Windows</button>
-    <button class="nav-item" data-route="plan">Plan a prompt</button>
-    <button class="nav-item" data-route="projects">Projects</button>
-    <button class="nav-item" data-route="history">History</button>
-    <button class="nav-item" data-route="setup">Setup</button>
+    <button class="nav-item" data-route="plan">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4 6.5l2.5 2-2.5 2M8 10.5h4"/></svg>
+      Plan a prompt</button>
+    <button class="nav-item" data-route="projects">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5l6 3-6 3-6-3 6-3z"/><path d="M2 8l6 3 6-3"/><path d="M2 11.5l6 3 6-3"/></svg>
+      Projects</button>
+    <button class="nav-item" data-route="dashboard">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 12.5a6 6 0 0 1 12 0"/><path d="M8 12.5V7.5M8 12.5l3-2.6"/><circle cx="8" cy="12.5" r="1" fill="currentColor" stroke="none"/></svg>
+      Windows</button>
+    <button class="nav-item" data-route="history">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.5V8l2.6 1.6"/></svg>
+      History</button>
+    <button class="nav-item" data-route="setup">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="2.3"/><path d="M8 1.6v1.6M8 12.8v1.6M14.4 8h-1.6M3.2 8H1.6M12.5 3.5l-1.1 1.1M4.6 11.4l-1.1 1.1M12.5 12.5l-1.1-1.1M4.6 4.6 3.5 3.5"/></svg>
+      Setup</button>
     <div class="nav-spacer"></div>
-    <div id="side-meter" class="small muted" style="padding:0 10px"></div>
     <button class="nav-item" id="theme-toggle" style="margin-top:8px">Toggle theme</button>
   </nav>
   <div class="content-pane">
-    <header id="selection-bar"></header>
     <main class="main" id="view"></main>
   </div>
 </div>

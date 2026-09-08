@@ -1,6 +1,6 @@
 /* PromptMeter UI — vanilla JS, no build step. */
 
-const S = { route: 'dashboard', id: null, status: null, models: [], vendors: [],
+const S = { route: 'plan', id: null, status: null, models: [], vendors: [],
             efforts: ['none','low','medium','high','max'], model: 'claude-sonnet-5',
             effort: 'medium', surface: 'terminal', plans: [], oracles: [], cache: {},
             csrfToken: null };
@@ -126,7 +126,7 @@ function modelChip(id, label) {
 
 /* ------------------------------------------------------- components */
 
-function ring(pctVal, size = 92, label = '') {
+function ring(pctVal, size = 92, label = '', arm = false) {
   const r = (size - 12) / 2, c = 2 * Math.PI * r, mid = size / 2;
   const v = pctVal == null ? 0 : Math.min(100, Math.max(0, pctVal));
   const sev = severity(v);
@@ -143,19 +143,49 @@ function ring(pctVal, size = 92, label = '') {
     return `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="var(--baseline)"
       stroke-width="${i % 3 === 0 ? 1.4 : 0.8}"/>`;
   }).join('');
+  // The arc sweeps in from empty on the very first paint of a browser session
+  // (armGaugeSweep(), called once from render()) — everywhere else it just
+  // renders at its true offset. `arm` only ever comes from the two Windows-
+  // screen instruments; every other caller gets the plain, unanimated ring.
+  const finalOffset = c * (1 - v / 100);
+  const arcAttrs = arm
+    ? `class="ring-arc" data-final-offset="${finalOffset}" style="stroke-dashoffset:${c}"`
+    : `style="stroke-dashoffset:${finalOffset}"`;
   return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" role="img"
       aria-label="${esc(label)} ${pctVal == null ? 'unknown' : v.toFixed(0) + ' percent used'}">
     <circle cx="${mid}" cy="${mid}" r="${r}" fill="none" stroke="var(--track)" stroke-width="9"/>
     <g opacity="0.6">${ticks}</g>
     ${pctVal == null ? '' : `<circle cx="${mid}" cy="${mid}" r="${r}" fill="none" stroke="${color}"
       stroke-width="9" stroke-linecap="round" stroke-dasharray="${c}"
-      stroke-dashoffset="${c * (1 - v / 100)}" transform="rotate(-90 ${mid} ${mid})"/>`}
+      ${arcAttrs} transform="rotate(-90 ${mid} ${mid})"/>`}
     <text x="${mid}" y="${mid + 1}" text-anchor="middle" dominant-baseline="middle"
       font-size="${size * 0.23}" font-weight="600" fill="var(--text-primary)"
       font-family="var(--mono)">${pctVal == null ? '–' : Math.round(v)}</text>
     <text x="${mid}" y="${mid + size * 0.19}" text-anchor="middle"
       font-size="${size * 0.11}" fill="var(--text-muted)" font-family="var(--font)">used %</text>
   </svg>`;
+}
+
+// Fires once per browser session (sessionStorage-gated, per Gemini's review
+// of this redesign — a re-render on every route change must not replay it),
+// and degrades to an instant jump under prefers-reduced-motion for free,
+// since the global rule at the top of styles.css already zeroes every
+// transition-duration on the page. Double rAF: one frame to let the browser
+// paint the "empty" starting state committed in the HTML string above,
+// a second to actually flip the value so the transition has something to
+// animate from.
+function armGaugeSweep() {
+  if (sessionStorage.getItem('pm-booted')) return;
+  sessionStorage.setItem('pm-booted', '1');
+  const targets = [...document.querySelectorAll('.ring-arc[data-final-offset]'),
+                    ...document.querySelectorAll('.spark-anim.pre')];
+  if (!targets.length) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    document.querySelectorAll('.ring-arc[data-final-offset]').forEach(el => {
+      el.style.strokeDashoffset = el.dataset.finalOffset;
+    });
+    document.querySelectorAll('.spark-anim.pre').forEach(el => el.classList.remove('pre'));
+  }));
 }
 
 function meter(usedPct, leftLabel, rightLabel) {
@@ -178,7 +208,7 @@ function progress(p, done) {
   return `<div class="progress-track"><div class="progress-fill ${done ? 'done' : ''}" style="width:${v}%"></div></div>`;
 }
 
-function spark(points, w = 260, h = 44, key = 'pct7') {
+function spark(points, w = 260, h = 44, key = 'pct7', arm = false) {
   if (!points || points.length < 2) return `<div class="small muted">Not enough history yet.</div>`;
   const xs = points.map(p => p.ts), ys = points.map(p => p[key] || 0);
   const x0 = Math.min(...xs), x1 = Math.max(...xs), y1 = Math.max(100, ...ys);
@@ -186,12 +216,18 @@ function spark(points, w = 260, h = 44, key = 'pct7') {
   const Y = v => h - 2 - (v / y1) * (h - 6);
   const d = points.map((p, i) => `${i ? 'L' : 'M'}${X(p.ts).toFixed(1)},${Y(p[key] || 0).toFixed(1)}`).join('');
   const last = points[points.length - 1];
+  // Draw-in via a clip-path reveal rather than measuring the path's real
+  // length (getTotalLength needs the node live in the DOM, which a string of
+  // HTML isn't yet) — a left-to-right wipe reads the same as a stroke
+  // drawing itself in, on any path shape, with no extra DOM round-trip.
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="Weekly window used over time">
     <line x1="0" y1="${h - 2}" x2="${w}" y2="${h - 2}" stroke="var(--grid)" stroke-width="1"/>
-    <path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"
-      stroke-linejoin="round" stroke-linecap="round"/>
-    <circle cx="${X(last.ts).toFixed(1)}" cy="${Y(last[key] || 0).toFixed(1)}" r="4"
-      fill="var(--accent)" stroke="var(--surface-1)" stroke-width="2"/>
+    <g class="spark-anim${arm ? ' pre' : ''}">
+      <path class="spark-path" d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"
+        stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${X(last.ts).toFixed(1)}" cy="${Y(last[key] || 0).toFixed(1)}" r="4"
+        fill="var(--accent)" stroke="var(--surface-1)" stroke-width="2"/>
+    </g>
   </svg>`;
 }
 
@@ -203,6 +239,12 @@ async function viewDashboard() {
   const hist = await api('/api/meter/history?hours=30').catch(() => ({ points: [] }));
   const f = s.five_hour, w = s.seven_day;
   const unmetered = f.used == null && w.used == null;
+  // True first run: no reading of any kind AND not one project ever created —
+  // totals.projects counts sample data too, so loading the demo also clears
+  // this. Fixes the #1-ranked backlog gap (ARCHITECTURE.md §12, "P1 — there
+  // is no first run"): a new user used to land on hatched empty bars with no
+  // idea what the app measures or what to do next.
+  const firstRun = unmetered && ((s.totals || {}).projects || 0) === 0;
 
   const heroLine = (() => {
     if (unmetered) return `No reading yet`;
@@ -248,6 +290,39 @@ async function viewDashboard() {
     </div>
   </div>
 
+  ${firstRun ? `
+  <div class="card">
+    <div class="label">What this measures</div>
+    <div class="hero">Two windows stand between you and a wall mid-run</div>
+    <p class="small muted mt8" style="max-width:62ch">A Claude Pro or Max plan enforces two limits: a
+      rolling <strong>5-hour session window</strong> and a <strong>7-day weekly window</strong>, both
+      shared across Claude chat, Claude Code and Cowork. Anthropic doesn't show you the dollar size of
+      either — only the percentage — so that's what the two dials below will track once they have a
+      reading to show.</p>
+    <div class="steps-num mt16">
+      <div class="stepn">
+        <div class="stepn-n">1</div>
+        <div style="flex:1;min-width:0">
+          <strong>Give it a real reading</strong>
+          <div class="small muted mt8">Ten seconds: open Claude's own usage view — the ring beside the
+            model picker in the desktop app, or <span class="mono">/usage</span> in the terminal — and
+            copy the four numbers across. The dials go live immediately and keep counting down on their
+            own from there.</div>
+          <div class="row mt12"><button class="btn-primary btn-sm" onclick="manualEntry()">Sync from Claude</button></div>
+        </div>
+      </div>
+      <div class="stepn">
+        <div class="stepn-n">2</div>
+        <div style="flex:1;min-width:0">
+          <strong>Or just look around first</strong>
+          <div class="small muted mt8">Loads a few days of plausible sample usage — clearly tagged, and
+            excluded from every real total — so you can see what a populated Windows, Projects and
+            History screen look like before committing anything real.</div>
+          <div class="row mt12"><button class="btn-sm" onclick="seedDemo()">See it with sample data</button></div>
+        </div>
+      </div>
+    </div>
+  </div>` : `
   <div class="card">
     <div class="spread" style="align-items:flex-start">
       <div style="min-width:0">
@@ -256,17 +331,17 @@ async function viewDashboard() {
         <div class="small muted mt8" style="max-width:52ch">${heroSub}</div>
       </div>
       <div style="text-align:right">
-        ${spark(hist.points, 280, 56, 'pct7')}
+        ${spark(hist.points, 280, 56, 'pct7', true)}
         <div class="small muted" style="margin-top:2px">weekly window used, last 30 hours</div>
       </div>
     </div>
     <div class="small muted mt12">${regimeText}</div>
-  </div>
+  </div>`}
 
   <div class="grid grid-3 mt16">
-    <div class="card">
+    <div class="card gauge-card">
       <div class="ring-card">
-        ${ring(f.used, 92, 'current session')}
+        ${ring(f.used, 92, 'current session', true)}
         <div class="ring-meta">
           <div class="label">Current session</div>
           <div class="n tnum">${f.used == null ? 'no reading' : f.used.toFixed(0) + '% used'}</div>
@@ -281,9 +356,9 @@ async function viewDashboard() {
           : 'Nothing burning locally right now.'}</div>
     </div>
 
-    <div class="card">
+    <div class="card gauge-card">
       <div class="ring-card">
-        ${ring(w.used, 92, 'weekly')}
+        ${ring(w.used, 92, 'weekly', true)}
         <div class="ring-meta">
           <div class="label">Weekly · all models</div>
           <div class="n tnum">${w.used == null ? 'no reading' : w.used.toFixed(0) + '% used'}</div>
@@ -461,7 +536,7 @@ async function viewPlan() {
       </div>
       <div class="grid grid-2" style="gap:10px">
         <div class="field"><label>Reasoning effort</label>
-          <select id="p-effort" ${sel && !sel.thinking ? 'disabled' : ''}>${(S.efforts || []).map(x =>
+          <select id="p-effort" onchange="onEffortChange(this.value)" ${sel && !sel.thinking ? 'disabled' : ''}>${(S.efforts || []).map(x =>
             `<option value="${x}" ${x === (S.effort || 'medium') ? 'selected' : ''}>${x}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Turn cap (blank = none)</label>
@@ -500,6 +575,7 @@ async function viewPlan() {
 function onModelChange(id) {
   S.model = id;
   localStorage.setItem('pm-model', id);
+  api('/api/settings', { method: 'PATCH', body: { model: id } }).catch(() => {});
   const eff = document.getElementById('p-effort');
   if (eff) { S.effort = eff.value; localStorage.setItem('pm-effort', eff.value); }
   const prompt = document.getElementById('p-prompt').value;
@@ -507,6 +583,17 @@ function onModelChange(id) {
     const box = document.getElementById('p-prompt');
     if (box) box.value = prompt;              // keep what was typed
   });
+}
+
+// Model persists on change (it reshapes the form — the effort select can
+// become disabled/enabled). Effort doesn't change the form's shape, so it
+// persists quietly without a full re-render. Both replace what the removed
+// persistent selection bar used to do (ARCHITECTURE.md §6) — the choice
+// still follows you to another browser pointed at this same install.
+function onEffortChange(v) {
+  S.effort = v;
+  localStorage.setItem('pm-effort', v);
+  api('/api/settings', { method: 'PATCH', body: { effort: v } }).catch(() => {});
 }
 
 async function doPreview() {
@@ -566,6 +653,7 @@ function renderPreview(p) {
         <div class="small muted">${esc(pl.risk || '')}</div>
       </div>
     </div>
+    ${pl.risk_context ? `<div class="small mt12" style="color:var(--serious)">${esc(pl.risk_context)}</div>` : ''}
 
     <div class="grid grid-2 mt16" style="gap:14px">
       <div>
@@ -616,6 +704,7 @@ function renderPreview(p) {
       const over = b.peak_context >= b.context_window;
       return `<div class="mt16">
       <div class="label">Token budget — typical run <span class="muted">(worst case in grey)</span></div>
+      ${segbar(b)}
       <table style="margin-top:6px">
         <tr><td>Input sent across ${b.turns} turns</td>
             <td class="num">${tokens(b.input_tokens)}</td>
@@ -732,6 +821,36 @@ function renderPreview(p) {
     <div class="small muted mt12">Finishes about ${p.schedule.hours_to_finish}h from now.
       Weekly window left afterwards: ${p.schedule.weekly_remaining_after.toFixed(0)}%.</div>
   </div>` : ''}`;
+}
+
+// A single hue stepped by opacity in pipeline order, not four categorical
+// colours — see the CSS comment on .segbar. input_tokens/output_tokens
+// already include growth_tokens/thinking_tokens as sub-totals (the table
+// this sits beside shows that nesting with an indented "of which" row), so
+// the bar carves those out into their own segment rather than double-
+// counting: the four segments sum to exactly total_tokens.
+function segbar(b) {
+  if (!b || !b.total_tokens) return '';
+  const growth = b.growth_tokens || 0;
+  const thinking = b.thinking_tokens || 0;
+  const inputBase = Math.max(0, (b.input_tokens || 0) - growth);
+  const outputBase = Math.max(0, (b.output_tokens || 0) - thinking);
+  const total = inputBase + growth + outputBase + thinking;
+  if (total <= 0) return '';
+  const parts = [
+    { label: 'input', v: inputBase, cls: 's0' },
+    { label: 're-sent conversation', v: growth, cls: 's1' },
+    { label: 'output', v: outputBase, cls: 's2' },
+    { label: 'thinking', v: thinking, cls: 's3' },
+  ].filter(p => p.v > 0);
+  const segs = parts.map(p => {
+    const w = p.v / total * 100;
+    return `<div class="seg ${p.cls}" style="flex:${Math.max(2, w)} 0 0">${w > 9 ? `<span>${tokens(p.v)}</span>` : ''}</div>`;
+  }).join('');
+  const legend = parts.map(p =>
+    `<span class="k"><span class="sw ${p.cls}"></span>${p.label} · ${tokens(p.v)}</span>`).join('');
+  return `<div class="segbar" role="img" aria-label="Token budget by kind">${segs}</div>
+    <div class="segbar-legend">${legend}</div>`;
 }
 
 function modelLabel(id) {
@@ -1205,6 +1324,46 @@ function openFromGraph(id) {
   setTimeout(() => document.querySelector('.step.open')?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 120);
 }
 
+// The calibration scatter — predicted cost on x, what it actually cost on y.
+// A point on the dashed diagonal was predicted exactly right; above it, the
+// estimate ran hot; below, cold. Colour carries only status (good/critical,
+// already reserved for exactly this meaning elsewhere in the app), never
+// identity, and the table beside this chart gives every point a label too —
+// colour is never the only way to read a result, per the dataviz guidance
+// this redesign followed for every new chart.
+function scatterCal(acc, w = 520, h = 260) {
+  const pts = acc.filter(a => a.predicted > 0 || a.actual > 0);
+  if (pts.length < 2) return `<div class="small muted">Not enough completed steps yet — this fills in as steps finish.</div>`;
+  const pad = 40;
+  const maxV = Math.max(...pts.map(p => Math.max(p.predicted, p.actual)), 0.01) * 1.08;
+  const X = v => pad + (v / maxV) * (w - pad - 14);
+  const Y = v => h - pad - (v / maxV) * (h - pad - 14);
+  const grid = [0.25, 0.5, 0.75, 1].map(f => {
+    const v = maxV * f, y = Y(v).toFixed(1);
+    return `<line x1="${X(0).toFixed(1)}" y1="${y}" x2="${w - 14}" y2="${y}" stroke="var(--grid)" stroke-width="1"/>
+      <text x="${(X(0) - 6).toFixed(1)}" y="${Y(v) + 3}" text-anchor="end" font-size="9.5"
+        fill="var(--text-muted)" font-family="var(--mono)">${usd(v)}</text>`;
+  }).join('');
+  const dots = pts.map(p => `<circle class="scatter-dot" cx="${X(p.predicted).toFixed(1)}" cy="${Y(p.actual).toFixed(1)}"
+    r="4" fill="${p.within_band ? 'var(--good)' : 'var(--critical)'}" fill-opacity="0.85">
+    <title>${esc(p.title)} — ${esc(p.project)} — predicted ${usd(p.predicted)}, actual ${usd(p.actual)}</title>
+  </circle>`).join('');
+  return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Predicted versus actual cost per completed step">
+    ${grid}
+    <line x1="${X(0).toFixed(1)}" y1="${Y(0).toFixed(1)}" x2="${X(maxV).toFixed(1)}" y2="${Y(maxV).toFixed(1)}"
+      stroke="var(--baseline)" stroke-width="1.2" stroke-dasharray="3 3"/>
+    <line x1="${X(0).toFixed(1)}" y1="${(h - pad).toFixed(1)}" x2="${X(0).toFixed(1)}" y2="10" stroke="var(--grid)" stroke-width="1"/>
+    ${dots}
+    <text x="${w / 2}" y="${h - 8}" text-anchor="middle" font-size="10.5" fill="var(--text-secondary)" font-family="var(--font)">Predicted cost</text>
+    <text x="12" y="16" font-size="10.5" fill="var(--text-secondary)" font-family="var(--font)">Actual</text>
+  </svg>
+  <div class="legend mt8">
+    <span class="k"><span class="sw" style="background:var(--good)"></span>within band</span>
+    <span class="k"><span class="sw" style="background:var(--critical)"></span>over worst case</span>
+    <span class="k"><span class="sw" style="background:var(--baseline)"></span>predicted exactly right</span>
+  </div>`;
+}
+
 /* ------------------------------------------------------------ history */
 
 async function viewHistory() {
@@ -1267,7 +1426,7 @@ async function viewHistory() {
   <div class="card">
     <div class="card-head"><h2>Predicted vs actual</h2>
       <span class="hint">the credibility check</span></div>
-    ${acc.length ? `<table>
+    ${acc.length ? `${scatterCal(acc)}<table style="margin-top:16px">
       <thead><tr><th>Step</th><th>Project</th><th class="num">Predicted</th>
         <th class="num">Worst case</th><th class="num">Actual</th><th>Verdict</th></tr></thead>
       <tbody>${acc.slice(0, 30).map(a => `<tr>
@@ -1502,6 +1661,13 @@ async function viewSetup() {
       <div class="small muted mt8">${esc((pv.registry.find(r => r.id === pv.active) || {}).note || '')}</div>
     </div>
 
+    <div class="row mt8" style="gap:10px;align-items:center">
+      <button class="btn-sm" onclick="checkOllama()" id="ollama-check-btn">Check for a local model</button>
+      <span class="small muted">Looks for Ollama on this machine and switches to it automatically —
+        nothing to type, nothing to pick above first.</span>
+    </div>
+    <div id="ollama-check-out" class="mt8"></div>
+
     ${pv.active === 'heuristic' ? '' : `
     <div class="grid grid-2" style="gap:12px;max-width:760px">
       <div class="field"><label>Model</label>
@@ -1626,6 +1792,36 @@ async function testProvider() {
   }
 }
 
+// One click: detect a local Ollama and switch to it if it's actually
+// answering — never installs it, never pulls a model (a multi-gigabyte
+// download is not something a button starts on its own). "Installed but not
+// running" and "not found at all" get different, honest messages rather
+// than one generic failure, since the fix for each is different.
+async function checkOllama() {
+  const btn = document.getElementById('ollama-check-btn');
+  const out = document.getElementById('ollama-check-out');
+  if (btn) btn.disabled = true;
+  if (out) out.innerHTML = `<div class="small muted">Checking…</div>`;
+  try {
+    const r = await api('/api/providers/ollama/check', { method: 'POST' });
+    if (r.running) {
+      toast(`Found Ollama — connected${r.models.length ? ' (' + r.models[0] + ')' : ''}.`);
+      S.cache.providers = null;
+      render();
+      return;
+    }
+    if (out) out.innerHTML = r.installed
+      ? `<div class="banner warning"><strong>Installed, but not running.</strong> Start Ollama, then
+          check again.</div>`
+      : `<div class="banner"><strong>Not found on this machine.</strong> Install it from
+          <span class="mono">ollama.com</span>, then check again — no address or model name to type in.</div>`;
+  } catch (e) {
+    if (out) out.innerHTML = `<div class="banner critical">${esc(e.message)}</div>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function doScan(full) {
   try {
     const r = await api('/api/setup/scan', { method: 'POST', body: { full: !!full } });
@@ -1704,7 +1900,7 @@ async function resetAll() {
 async function doReset() {
   try {
     await api('/api/reset', { method: 'POST', body: { confirm: 'RESET_ALL_DATA' } });
-    closeModal(); toast('Erased.'); go('dashboard');
+    closeModal(); toast('Erased.'); go('plan');
   } catch (e) { toast(e.message, true); }
 }
 
@@ -1728,80 +1924,6 @@ function modal(html) {
   document.body.appendChild(bg);
 }
 function closeModal() { document.querySelectorAll('.modal-bg').forEach(m => m.remove()); }
-
-/* ---------------------------------------------------- selection bar */
-//
-// Set once, applies everywhere a model/effort/plan gets used, instead of
-// re-picking it on every prompt. Model and effort persist server-side (see
-// PATCH /api/settings) the same way `plan` already did, so the choice
-// follows you to another browser pointed at this same install — localStorage
-// is only the instant-paint fallback before that first server round-trip.
-// Surface is informational only: it does not change any cost math, since
-// nothing in this app currently measures a real difference between terminal
-// and desktop overhead (see ARCHITECTURE.md §8, "honest failure over silent
-// guessing") — Cowork/browser usage has no option here at all, because
-// nothing here can see it either way.
-
-function renderSelectionBar() {
-  const host = document.getElementById('selection-bar');
-  if (!host) return;
-  const cap = (S.status || {}).capacity || {};
-  const measured = cap.confidence === 'measured';
-
-  host.innerHTML = `
-  <div class="selbar">
-    <div class="selbar-group">
-      <label>Surface</label>
-      <select onchange="setSurface(this.value)">
-        <option value="terminal" ${S.surface === 'terminal' ? 'selected' : ''}>Claude Code — terminal</option>
-        <option value="desktop" ${S.surface === 'desktop' ? 'selected' : ''}>Claude Code — desktop app</option>
-      </select>
-    </div>
-    <div class="selbar-group">
-      <label>Plan</label>
-      <select onchange="setPlan(this.value)">
-        ${(S.plans || []).map(p => `<option value="${p.id}" ${p.id === cap.plan ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}
-      </select>
-      <span class="chip small ${measured ? 'good' : ''}" title="${measured
-        ? 'Solved from a real usage reading you synced.'
-        : 'A starting estimate — sync a reading on Setup to measure it exactly.'}">${measured ? 'measured' : 'estimate'}</span>
-    </div>
-    <div class="selbar-group">
-      <label>Model</label>
-      <select onchange="setDefaultModel(this.value)">
-        ${(S.vendors || []).map(v => `<optgroup label="${esc(v.label)}">${v.models.map(m =>
-          `<option value="${m.id}" ${m.id === S.model ? 'selected' : ''}>${esc(m.label)}</option>`).join('')}</optgroup>`).join('')}
-      </select>
-    </div>
-    <div class="selbar-group">
-      <label>Effort</label>
-      <select onchange="setDefaultEffort(this.value)">
-        ${(S.efforts || []).map(x => `<option value="${x}" ${x === S.effort ? 'selected' : ''}>${x}</option>`).join('')}
-      </select>
-    </div>
-    <div class="selbar-hint small muted">Applies to every new plan — set once, not per prompt.</div>
-  </div>`;
-}
-
-async function setSurface(v) {
-  S.surface = v;
-  try { await api('/api/settings', { method: 'PATCH', body: { surface: v } }); }
-  catch (e) { toast(e.message, true); }
-}
-
-async function setDefaultModel(v) {
-  S.model = v;
-  localStorage.setItem('pm-model', v);
-  try { await api('/api/settings', { method: 'PATCH', body: { model: v } }); }
-  catch (e) { toast(e.message, true); }
-}
-
-async function setDefaultEffort(v) {
-  S.effort = v;
-  localStorage.setItem('pm-effort', v);
-  try { await api('/api/settings', { method: 'PATCH', body: { effort: v } }); }
-  catch (e) { toast(e.message, true); }
-}
 
 /* ------------------------------------------------------------ router */
 
@@ -1828,7 +1950,7 @@ async function render() {
   host.classList.add('loading');
   let html, failed = null;
   try {
-    html = await (VIEWS[S.route] || viewDashboard)();
+    html = await (VIEWS[S.route] || viewPlan)();
   } catch (e) {
     failed = e;
   }
@@ -1841,31 +1963,18 @@ async function render() {
   }
   host.innerHTML = html;
   if (S.route === 'project' && currentProjTab() === 'graph') drawGraph();
-  await sideMeter();
-  renderSelectionBar();
-}
-
-async function sideMeter() {
-  try {
-    const s = S.status || await api('/api/status');
-    S.status = s;
-    const f = s.five_hour, w = s.seven_day;
-    document.getElementById('side-meter').innerHTML = `
-      <div style="margin-bottom:8px">
-        <div class="spread small"><span>5-hour</span><span class="tnum">${pct(f.used)}</span></div>
-        ${meter(f.used, dur(f.seconds_to_reset) + ' to reset', '')}
-      </div>
-      <div>
-        <div class="spread small"><span>Weekly</span><span class="tnum">${pct(w.used)}</span></div>
-        ${meter(w.used, dur(w.seconds_to_reset) + ' to reset', '')}
-      </div>`;
-  } catch { /* daemon busy */ }
+  if (S.route === 'dashboard') armGaugeSweep();
 }
 
 function parseHash() {
-  const h = (location.hash || '#dashboard').slice(1);
+  // Default route is the prompt composer, not the usage-limits screen — the
+  // composer is what the app opens to (September 2026, IA pass 2). Usage
+  // percentages live only on the Windows screen now: no sidebar mini-meter,
+  // no persistent top bar keeping them in view on every other screen. See
+  // ARCHITECTURE.md §6.
+  const h = (location.hash || '#plan').slice(1);
   const [r, id] = h.split('/');
-  S.route = VIEWS[r] ? r : 'dashboard';
+  S.route = VIEWS[r] ? r : 'plan';
   S.id = id ? Number(id) : null;
 }
 
@@ -1880,6 +1989,20 @@ document.getElementById('theme-toggle').onclick = () => {
 };
 
 window.addEventListener('hashchange', () => { parseHash(); render(); });
+
+// Cursor-follow glow (September 2026, part 3 — "mouse designs"). One
+// delegated listener, set once, rather than wiring a per-element handler on
+// every render() — .card/.proj are rebuilt from scratch on every screen
+// change, so anything attached directly to them would need re-attaching
+// constantly. --mx/--my are read by the ::after glow in styles.css; setting
+// them on the element itself is cheap enough to do on every pointermove.
+document.addEventListener('pointermove', e => {
+  const el = e.target.closest('.card, .proj');
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  el.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+  el.style.setProperty('--my', (e.clientY - r.top) + 'px');
+});
 
 (async function boot() {
   const t = localStorage.getItem('pm-theme');
@@ -1918,5 +2041,4 @@ window.addEventListener('hashchange', () => { parseHash(); render(); });
 
   parseHash();
   render();
-  setInterval(async () => { try { S.status = await api('/api/status'); sideMeter(); } catch {} }, 30000);
 })();

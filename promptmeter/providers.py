@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import time
 import urllib.error
 import urllib.request
@@ -357,6 +358,38 @@ def _parse(raw: str) -> dict:
             "complexity": max(1.0, min(5.0, c)),
         })
     return {"items": [i for i in items if i["title"]], "notes": str(d.get("notes") or "")[:300]}
+
+
+def check_ollama(base_url: str | None = None) -> dict:
+    """Detect a local Ollama install without asking it to do any work, and
+    say plainly which of "on PATH" and "daemon answering" is true — they can
+    differ (installed but not started is common right after setup).
+
+    Two checks, both local-only:
+      - `shutil.which("ollama")` — a filesystem PATH lookup, no subprocess.
+      - `GET {base}/api/tags` on loopback — the same kind of call `_ollama()`
+        already makes to actually draft a plan, just against a status
+        endpoint instead. This is not the "no network calls" rule being
+        bent: 127.0.0.1 never leaves the machine, same as the app's own
+        server binding and the live-meter shim's POST to itself.
+
+    Never pulls a model and never installs anything — a multi-gigabyte
+    download or a software install is not something this app triggers on
+    your behalf without you typing the command yourself. The caller
+    (`server.py`) only auto-enables the provider when the daemon actually
+    answered; "installed but not running" still needs you to start it.
+    """
+    base = (base_url or config()["base_url"] or "http://localhost:11434").rstrip("/")
+    binary = shutil.which("ollama")
+    try:
+        req = urllib.request.Request(f"{base}/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=3) as r:
+            data = json.loads(r.read().decode("utf-8", "replace"))
+        models = [m.get("name") for m in (data.get("models") or []) if m.get("name")]
+        return {"installed": True, "running": True, "binary": binary, "models": models}
+    except Exception:                                      # noqa: BLE001
+        return {"installed": binary is not None, "running": False,
+                "binary": binary, "models": []}
 
 
 def test(provider: str | None = None) -> dict:

@@ -59,6 +59,38 @@
   --r-sm: 6px;
   --font: system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+
+  /* Bench-instrument texture (September 2026 redesign, part 2). One faint
+     line colour, derived from --grid rather than a new hex per theme, so it
+     never needs its own light/dark override block — recomputes automatically
+     wherever --grid does. Used for the graph-paper graticule on the two
+     headline gauges and, sparingly, similar instrument surfaces — a texture,
+     not decoration, and never a colour that carries its own meaning (that
+     mistake — one hue standing for two things — is exactly what made
+     --accent/--series-1 collide before; see the note below on .gauge-card). */
+  --graticule: color-mix(in srgb, var(--grid) 55%, transparent);
+
+  /* Glass HUD surface (September 2026, part 3 — explicit user direction:
+     "somewhat translucent," not fully see-through). Derived from --surface-1
+     via color-mix rather than a second hex per theme, same pattern as
+     --graticule above — recomputes correctly in both themes for free.
+     Applied to outer chrome (.card, .sidebar, .modal, .step, .proj) so the
+     slow-drifting backdrop shows through faintly behind panels; inputs/
+     selects/.prompt-box stay fully opaque on purpose — a form field that
+     shows moving background through it is harder to read, not more alive. */
+  --glass: color-mix(in srgb, var(--surface-1) 82%, transparent);
+  --glass-border: color-mix(in srgb, var(--border) 140%, transparent);
+
+  /* The animated backdrop's two hues — decorative only, never a data or
+     status colour, so this is the one place a new hue is safe to add
+     without repeating the --accent/--series-1 meaning-collision mistake:
+     nothing here is ever read as "this measures X." --blob-1 reuses
+     --accent at low opacity (the app's own signal colour, drifting rather
+     than static); --blob-2 is a cool violet-blue that exists nowhere else
+     in the palette, chosen to sit far from every status hue so it can never
+     be mistaken for one even at a glance. */
+  --blob-1: var(--accent);
+  --blob-2: #5b6fd1;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -123,6 +155,32 @@ body {
   font-size: 14px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  position: relative;
+}
+
+/* The living backdrop — three soft, blurred hue patches that drift slowly
+   behind every screen, quiet enough to never compete with a number. Fixed
+   and behind everything (.app carries the z-index that lifts real content
+   above it), so it never scrolls with the page or gets clipped by a panel's
+   own overflow. Frozen to a single still frame under prefers-reduced-motion
+   by the existing global transition/animation-duration rule below. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: -10%;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(38% 40% at 16% 18%, color-mix(in srgb, var(--blob-1) 15%, transparent), transparent 70%),
+    radial-gradient(34% 38% at 86% 78%, color-mix(in srgb, var(--blob-2) 13%, transparent), transparent 70%),
+    radial-gradient(28% 32% at 70% 12%, color-mix(in srgb, var(--blob-1) 8%, transparent), transparent 70%);
+  filter: blur(70px);
+  animation: bg-drift 46s ease-in-out infinite alternate;
+}
+@keyframes bg-drift {
+  0%   { transform: translate(0, 0) scale(1); }
+  50%  { transform: translate(2.5%, -2%) scale(1.05); }
+  100% { transform: translate(-2%, 2.5%) scale(1); }
 }
 
 h1, h2, h3, h4 { margin: 0; font-weight: 600; letter-spacing: -0.01em; }
@@ -141,12 +199,14 @@ a:hover { text-decoration: underline; }
 
 /* ------------------------------------------------------------ layout */
 
-.app { display: flex; min-height: 100vh; }
+.app { display: flex; min-height: 100vh; position: relative; z-index: 1; }
 
 .sidebar {
   width: 216px; flex: 0 0 216px;
-  background: var(--surface-1);
-  border-right: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border-right: 1px solid var(--glass-border);
   border-top: 2px solid var(--accent);
   padding: 20px 12px;
   display: flex; flex-direction: column; gap: 2px;
@@ -170,10 +230,13 @@ a:hover { text-decoration: underline; }
   color: var(--text-secondary); cursor: pointer;
   font-size: 13.5px; background: none; width: 100%; text-align: left;
   font-family: inherit;
+  transition: background-color .15s ease, color .15s ease;
 }
 .nav-item:hover { background: var(--raise); color: var(--text-primary); }
 .nav-item.active { background: var(--raise); color: var(--text-primary); font-weight: 600;
-  border-left-color: var(--accent); }
+  border-left-color: var(--accent); box-shadow: inset 2px 0 6px -3px var(--accent); }
+.nav-item svg { flex: 0 0 16px; opacity: .85; }
+.nav-item.active svg, .nav-item:hover svg { opacity: 1; }
 .nav-spacer { flex: 1; }
 
 .content-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; }
@@ -183,29 +246,35 @@ a:hover { text-decoration: underline; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
 .page-head .sub { color: var(--text-secondary); font-size: 13px; margin-top: 3px; }
 
-/* -------------------------------------------------------- selection bar */
-
-#selection-bar:empty { display: none; }
-.selbar {
-  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
-  padding: 9px 28px; background: var(--surface-1); border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; z-index: 5;
-}
-.selbar-group { display: flex; align-items: center; gap: 7px; }
-.selbar-group label { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
-.selbar-group select { width: auto; padding: 5px 8px; font-size: 12.5px; min-width: 130px; }
-.selbar-hint { margin-left: auto; white-space: nowrap; }
-@media (max-width: 900px) { .selbar-hint { display: none; } }
 
 /* ------------------------------------------------------------ cards */
 
 .card {
-  background: var(--surface-1);
-  border: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid var(--glass-border);
   border-radius: var(--r);
   padding: 16px;
+  position: relative;
+  isolation: isolate;             /* keeps the glow layer from bleeding under a sibling */
 }
 .card + .card { margin-top: 14px; }
+
+/* Cursor-follow glow — a soft highlight centred on the pointer, the one
+   place the "mouse design" the user asked for actually lives. --mx/--my are
+   set by a single delegated pointermove listener in app.js (boot()), not
+   per-render, so every card gets it for free. Pure opacity fade-in, never a
+   layout shift, and it never fires without a real pointer (nothing sets
+   these vars on a touch-only device, so the layer just stays invisible). */
+.card::after {
+  content: "";
+  position: absolute; inset: 0; border-radius: inherit;
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%),
+    color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%);
+  opacity: 0; transition: opacity .25s ease; pointer-events: none; z-index: -1;
+}
+.card:hover::after { opacity: 1; }
 .card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .card-head .hint { color: var(--text-muted); font-size: 12px; }
 
@@ -247,14 +316,20 @@ a:hover { text-decoration: underline; }
 button, .btn {
   font-family: inherit; font-size: 13px; font-weight: 500;
   padding: 7px 13px; border-radius: var(--r-sm);
-  border: 1px solid var(--border); background: var(--surface-1);
+  border: 1px solid var(--border); background: var(--glass);
   color: var(--text-primary); cursor: pointer; line-height: 1.4;
+  transition: background-color .15s ease, border-color .15s ease,
+    box-shadow .15s ease, transform .08s ease;
 }
-button:hover, .btn:hover { background: var(--raise); }
-button:disabled { opacity: .45; cursor: not-allowed; }
+button:hover, .btn:hover { background: var(--raise); border-color: var(--baseline);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent); }
+button:active, .btn:active { transform: scale(.97); }
+button:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; transform: none; }
 .btn-primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.btn-primary:hover { background: var(--accent); filter: brightness(1.08); }
+.btn-primary:hover { background: var(--accent); filter: brightness(1.1);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent); }
 .btn-danger { color: var(--critical); border-color: var(--border); }
+.btn-danger:hover { box-shadow: 0 0 0 3px color-mix(in srgb, var(--critical) 14%, transparent); }
 .btn-sm { padding: 4px 9px; font-size: 12px; border-radius: 5px; }
 
 input, textarea, select {
@@ -322,6 +397,82 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .ring-meta { min-width: 0; }
 .ring-meta .n { font-size: 24px; font-weight: 600; }
 
+/* Gauge cards — the two headline instruments on the Windows screen (and
+   nowhere decorative gets this treatment; restraint is the point). A faint
+   graph-paper graticule plus four corner-reticle marks, like a bench
+   multimeter's screen rather than a SaaS stat card. Deliberately colour-
+   neutral: the texture is drawn from --graticule/--baseline, which already
+   carry no meaning of their own, so "which gauge is which" still comes from
+   the label text and layout, never from giving one gauge its own accent hue
+   — that would repeat the exact --accent/--series-1 collision this project
+   already fixed once (ARCHITECTURE.md §6). */
+.gauge-card {
+  position: relative;
+  cursor: crosshair;      /* the one "mouse design" touch — scoped to the
+                              two instruments the reticle corners already
+                              mark out, not the whole page */
+  --reticle: 9px;
+  background-image:
+    linear-gradient(var(--graticule) 1px, transparent 1px),
+    linear-gradient(90deg, var(--graticule) 1px, transparent 1px),
+    linear-gradient(var(--baseline) 1.5px, transparent 1.5px), linear-gradient(90deg, var(--baseline) 1.5px, transparent 1.5px),
+    linear-gradient(var(--baseline) 1.5px, transparent 1.5px), linear-gradient(90deg, var(--baseline) 1.5px, transparent 1.5px),
+    linear-gradient(var(--baseline) 1.5px, transparent 1.5px), linear-gradient(90deg, var(--baseline) 1.5px, transparent 1.5px),
+    linear-gradient(var(--baseline) 1.5px, transparent 1.5px), linear-gradient(90deg, var(--baseline) 1.5px, transparent 1.5px);
+  background-repeat: repeat, repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat, no-repeat;
+  background-size:
+    16px 16px, 16px 16px,
+    var(--reticle) 1.5px, 1.5px var(--reticle),
+    var(--reticle) 1.5px, 1.5px var(--reticle),
+    var(--reticle) 1.5px, 1.5px var(--reticle),
+    var(--reticle) 1.5px, 1.5px var(--reticle);
+  background-position:
+    -1px -1px, -1px -1px,
+    12px 12px, 12px 12px,
+    calc(100% - 12px - var(--reticle)) 12px, calc(100% - 12px) 12px,
+    12px calc(100% - 12px), 12px calc(100% - 12px - var(--reticle)),
+    calc(100% - 12px - var(--reticle)) calc(100% - 12px), calc(100% - 12px) calc(100% - 12px - var(--reticle));
+}
+
+/* The gauge arc sweeps into place once, on the very first paint of a browser
+   session — see armGaugeSweep() in app.js. Everywhere else (every later
+   navigation back to this screen) the ring paints at its true value
+   immediately, no transition. prefers-reduced-motion already zeroes every
+   transition-duration on the page (see the global rule above), so this
+   degrades to an instant jump for free — no extra media query needed here. */
+.ring-arc { transition: stroke-dashoffset 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
+/* A clip-path wipe, not a stroke-dashoffset draw — that would need the
+   path's real length, which means an extra getTotalLength() DOM round-trip;
+   a left-to-right reveal reads the same and works on any path shape. */
+.spark-anim { transition: clip-path 0.9s cubic-bezier(0.16, 1, 0.3, 1); }
+.spark-anim.pre { clip-path: inset(0 100% 0 0); }
+
+/* ------------------------------------------------------- token budget bar */
+
+/* A single hue, stepped by opacity in pipeline order (input → re-sent
+   growth → output → thinking) — a magnitude ramp, not a categorical palette.
+   Deliberately not a 4-colour categorical set: those slots (--series-1..4)
+   already mean "model tier" elsewhere in the app, and a 4th, unrelated
+   meaning for the same hues would be the same collision this file's other
+   comments keep warning against. */
+.segbar { display: flex; height: 22px; border-radius: var(--r-sm); overflow: hidden; gap: 2px; background: var(--page); }
+.segbar .seg { background: var(--accent); display: flex; align-items: center; justify-content: center;
+  min-width: 0; position: relative; }
+.segbar .seg span { font-family: var(--mono); font-size: 10.5px; font-weight: 600; color: var(--accent-ink);
+  white-space: nowrap; overflow: hidden; text-overflow: clip; padding: 0 4px; }
+.segbar .seg.s0 { opacity: 0.38; } .segbar .seg.s1 { opacity: 0.58; }
+.segbar .seg.s2 { opacity: 0.8; }  .segbar .seg.s3 { opacity: 1; }
+.segbar-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-secondary); margin-top: 6px; }
+.segbar-legend .k { display: flex; align-items: center; gap: 6px; }
+.segbar-legend .sw { width: 10px; height: 10px; border-radius: 2px; background: var(--accent); }
+.segbar-legend .sw.s0 { opacity: 0.38; } .segbar-legend .sw.s1 { opacity: 0.58; }
+.segbar-legend .sw.s2 { opacity: 0.8; }  .segbar-legend .sw.s3 { opacity: 1; }
+
+/* ------------------------------------------------------------- scatter */
+
+.scatter-dot { transition: r 0.12s ease; }
+.scatter-dot:hover { r: 6; }
+
 /* ------------------------------------------------------------ tables */
 
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -337,11 +488,22 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 /* ------------------------------------------------------------ project cards */
 
 .proj {
-  background: var(--surface-1); border: 1px solid var(--border);
+  background: var(--glass);
+  backdrop-filter: blur(16px) saturate(150%); -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid var(--glass-border);
   border-radius: var(--r); padding: 14px; display: flex; flex-direction: column; gap: 10px;
-  cursor: pointer;
+  cursor: pointer; position: relative; isolation: isolate;
+  transition: border-color .15s ease;
 }
 .proj:hover { border-color: var(--baseline); }
+.proj::after {
+  content: "";
+  position: absolute; inset: 0; border-radius: inherit;
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%),
+    color-mix(in srgb, var(--accent) 10%, transparent), transparent 70%);
+  opacity: 0; transition: opacity .25s ease; pointer-events: none; z-index: -1;
+}
+.proj:hover::after { opacity: 1; }
 .proj .title { font-weight: 600; font-size: 14px; }
 .proj .goal { color: var(--text-secondary); font-size: 12.5px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -350,8 +512,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 /* ------------------------------------------------------------ steps */
 
 .step {
-  border: 1px solid var(--border); border-radius: var(--r);
-  background: var(--surface-1); padding: 13px; margin-bottom: 10px;
+  border: 1px solid var(--glass-border); border-radius: var(--r);
+  background: var(--glass);
+  backdrop-filter: blur(16px) saturate(150%); -webkit-backdrop-filter: blur(16px) saturate(150%);
+  padding: 13px; margin-bottom: 10px;
 }
 .step.active { border-color: var(--accent); }
 .step-head { display: flex; align-items: flex-start; gap: 10px; justify-content: space-between; }
@@ -408,19 +572,24 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; font-fam
 
 .toast {
   position: fixed; right: 20px; bottom: 20px; z-index: 50;
-  background: var(--surface-1); border: 1px solid var(--border);
+  background: var(--glass); backdrop-filter: blur(16px) saturate(150%);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  border: 1px solid var(--glass-border);
   border-left: 3px solid var(--good);
   border-radius: var(--r-sm); padding: 11px 15px; font-size: 13px;
-  box-shadow: 0 6px 20px rgba(0,0,0,.10); max-width: 380px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.18); max-width: 380px;
 }
 .toast.err { border-left-color: var(--critical); }
 
 .modal-bg {
-  position: fixed; inset: 0; background: rgba(0,0,0,.42); z-index: 40;
+  position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 40;
   display: grid; place-items: center; padding: 20px;
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
 }
 .modal {
-  background: var(--surface-1); border: 1px solid var(--border);
+  background: var(--glass); backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  border: 1px solid var(--glass-border);
   border-radius: var(--r); padding: 20px; width: min(640px, 100%);
   max-height: 86vh; overflow: auto;
 }

@@ -173,6 +173,26 @@ def verdict_generic(turns_p95: float, risk_band: str = "green") -> dict:
             "band": "good"}
 
 
+def _risk_context(worst_band: str, risk_band: str) -> str:
+    """Bridges a real, recurring point of confusion: the worst-case *size*
+    (session-fraction or turn-count) and the *risk* percentage are computed by
+    two different mechanisms — size.py/loop_budget measures how much of a
+    window a run could use, the estimator's logistic score measures whether
+    anything stops it from running indefinitely (mainly: no turn cap, no
+    acceptance criteria, open-ended wording — see estimator.py). A prompt can
+    legitimately be small AND likely to be cut off at the same time — small
+    doesn't buy safety when nothing bounds the loop — but showing "Tiny" next
+    to "expect to be cut off" with no bridge reads as a contradiction rather
+    than two true, independent facts. Only fires for that specific mismatch;
+    silent otherwise so it never adds noise to a run that quietly agrees.
+    """
+    if worst_band in ("good", "warning") and risk_band in ("red", "critical"):
+        return ("Small and risky at the same time — the size is fine, but nothing "
+                "here caps how long it can run. A turn cap and a clear finish "
+                "condition are what actually lower the risk.")
+    return ""
+
+
 def risk_sentence(p: float, band: str) -> str:
     """What the risk percentage actually predicts."""
     pct = int(round((p or 0) * 100))
@@ -232,6 +252,7 @@ def explain(est: dict, remaining_pp5: float | None = None) -> dict:
         "worst": worst,
         "verdict": vd,
         "risk": risk_sentence(est.get("risk", 0), est.get("risk_band", "green")),
+        "risk_context": _risk_context(worst["band"], est.get("risk_band", "green")),
         "cost": money(est.get("cost_p50")),
         "cost_worst": money(est.get("cost_p95")),
         "turns": (f"About {turns_p50:.0f} back-and-forth steps, "

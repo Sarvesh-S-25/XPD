@@ -16,9 +16,9 @@ tunable data files (§8) and the frontend's conventions (§6), and — in §12 �
 the live backlog: what was fixed in each audit pass, and what's still open,
 ranked by severity across security, accuracy, product and engineering. Check a
 task against §12 before assuming it is new: if what's being asked matches an
-open item (e.g. P1 "there is no first run", A2 "the priors are estimates, not
-measurements"), say which item it is and work from that description rather
-than rediscovering the problem.
+open item (e.g. P3 "step status is still manual", A2 "the priors are
+estimates, not measurements"), say which item it is and work from that
+description rather than rediscovering the problem.
 
 There is no phased build plan here and no `npm run` anything — this is not a
 Node project. `node` only appears once in this repo, in `.claude/scripts/gemini.mjs`,

@@ -685,10 +685,13 @@ check) at boot, before it can need it. `POST /api/reset` additionally requires
 database on an unconfirmed, unauthenticated POST, a worse sibling of the
 shell-oracle gap §12 S1 originally scoped.
 
-**`GET`/`PATCH /api/settings`.** The persistent selection bar's server-side
-half: default model, effort, and surface, one `settings` key per field
-(`default_model`/`default_effort`/`default_surface`). `plan` already had its
-own route (`/api/setup/plan`) before this existed and keeps it.
+**`GET`/`PATCH /api/settings`.** Persists the default model and effort, one
+`settings` key per field (`default_model`/`default_effort`) — originally the
+now-removed persistent selection bar's server-side half (§6), called today
+from `viewPlan()`'s own inline pickers instead. `default_surface` is still
+accepted and stored but has had no frontend control since the bar's removal.
+`plan` already had its own route (`/api/setup/plan`) before this existed and
+keeps it.
 
 ### `installer.py` (254 lines) — editing settings safely
 
@@ -730,9 +733,9 @@ that is simpler and fast enough.
 
 | Route | Function | What it answers |
 |---|---|---|
-| `#dashboard` | `viewDashboard` | How much of my limit is left, and when do I run out? |
-| `#plan` | `viewPlan` | What will this prompt cost, and should I split it? |
+| `#plan` | `viewPlan` | What will this prompt cost, and should I split it? — **the default route** (`parseHash()`), and the nav's top item. |
 | `#projects` | `viewProjects` | What am I working on and how far along is it? |
+| `#dashboard` | `viewDashboard` | How much of my limit is left, and when do I run out? |
 | `#project/:id` | `viewProject` | Steps, iterations, the step graph. |
 | `#history` | `viewHistory` | What has it learned, and were its estimates right? |
 | `#setup` | `viewSetup` | Tracking status, calibration, providers, the status line. |
@@ -752,17 +755,38 @@ that is simpler and fast enough.
   sentence ("Do not send this as one prompt") and hides percentages and
   dollars behind disclosure. The server computes both; the UI chooses the order.
 
-**The selection bar** (September 2026), `renderSelectionBar()`, fills
-`<header id="selection-bar">` above `<main>` — outside the router, so it
-survives every route change; it's redrawn once per `render()` call, after
-`sideMeter()` so it always has a fresh `S.status`. Surface, plan, model and
-effort are set once here instead of per prompt. Model and effort persist
-server-side via `PATCH /api/settings` (`localStorage` is only the instant-paint
-fallback before that first round-trip resolves); plan already persisted
-server-side before this existed. Surface is informational only — restricted
-to `terminal`/`desktop`, the only two `meter.py` can actually see, and it
-never adjusts cost math, since nothing here measures a real difference
-between them (§11, "honest failure over silent guessing").
+**No persistent selection bar or sidebar meter (September 2026, IA pass 2) —
+superseded design decision.** A prior pass added `renderSelectionBar()` (a
+`<header>` of Surface/Plan/Model/Effort dropdowns, sticky above `<main>` on
+every route) and `sideMeter()` (a 5-hour/weekly mini-meter pinned under the
+nav, also on every route). Explicit user direction reversed this: usage-limit
+chrome and model/agent selection must not stay in view on every screen — see
+the standing product-direction memory this repo's maintainer keeps. Both were
+removed outright, not replaced with a smaller version of the same idea:
+- **Model and effort** already had their own inline `<select>`s inside
+  `viewPlan()`'s composer form (`#p-model`, `#p-effort`) — the persistent
+  bar's copies were pure duplication. `onModelChange()`/`onEffortChange()`
+  now do the `PATCH /api/settings` persistence the removed bar used to do,
+  so the choice still follows you to another browser on the same install.
+- **Plan** (the subscription plan, for window-size estimation) already had
+  its own control on the Setup screen (`setPlan()`) — nothing lost.
+- **Surface** (terminal/desktop) was already informational-only and never
+  affected cost math (§11); its UI was simply dropped rather than relocated.
+- **Usage percentages** now live only on `#dashboard`, reached via the nav
+  like any other screen, not kept in peripheral view while doing anything
+  else in the app.
+
+**"Send it" — where the persistent bar's spirit survives, reshaped.**
+`renderSendIt()`, a card in `viewPlan()`'s estimate output (not global
+chrome), lets you optionally pick a destination — Claude Code, Codex, or
+plain text — *after* seeing the cost/risk, not before. It never changes the
+copied prompt text itself (this app has no way to verify an agent-specific
+wrapper would be correct — see §11, "honest failure over silent guessing");
+it only changes the copy button's label and the hint under it, and the same
+`destination` module variable (localStorage-only, not server-persisted —
+it affects no computed number) drives the step-level copy button's label in
+`renderStep()` too, so the choice is consistent across the Plan preview and
+a created project's steps.
 
 **The design system in `styles.css`.** The identity (September 2026 redesign):
 an instrument, not a SaaS dashboard. PromptMeter's actual subject is a meter —
@@ -807,9 +831,29 @@ their own background wash (`--warning-bg`/`--serious-bg`), not just a
 swatch-dot colour — the two used to be visually near-identical
 text-on-`--page`, distinguished only by an 8px dot.
 
+**Bench-instrument texture (September 2026, part 2).** `.gauge-card` — used
+only on the Windows screen's two ring cards — adds a faint graph-paper
+graticule and four corner-reticle brackets, built from `--grid`/`--baseline`
+via `color-mix()` and layered `background-image` gradients rather than a new
+colour or an image asset, so it recomputes correctly in both themes with no
+extra dark-mode block. `ring()` and `spark()` take an optional `arm` flag
+that renders them at zero and lets a CSS transition sweep them to their true
+value once, on the first paint of a browser session (`armGaugeSweep()`,
+`sessionStorage`-gated) — the one deliberate motion moment in the app,
+never replayed on a later navigation, and reduced to an instant jump under
+`prefers-reduced-motion` by the existing global rule. `segbar()` (Plan
+screen) and `scatterCal()` (History screen) are the same hand-written-SVG/
+CSS pattern as `ring()`/`meter()`/`spark()`: no charting library, every
+interpolation through `esc()`, colour used only where it already carries
+meaning (a single hue stepped by opacity for a magnitude ramp in `segbar`,
+the existing `--good`/`--critical` pair for status in `scatterCal`) — never
+a new hue standing in for a new meaning, which is the mistake §12 already
+documents once with `--accent`/`--series-1`.
+
 Components: `.card`, `.banner`, `.chip`, `.meter`, `.progress-track`, `.step`,
-`.stepn` (numbered setup steps), `.selbar` (the selection bar), `.modal-bg`,
-`.toast`.
+`.stepn` (numbered setup steps), `.tabs`/`.tab` (also reused for the "Send it"
+destination picker in §6 above, rather than inventing a new toggle control),
+`.modal-bg`, `.toast`.
 
 **Adding a screen:** write `async function viewThing() { return \`<html>\` }`,
 add it to the `VIEWS` map, add a `<button class="nav-item" data-route="thing">`
@@ -1081,8 +1125,11 @@ Refuse to fit capacity to usage that isn't there. Show *"no reading yet"* as a
 hatched bar rather than an empty one that reads as zero. Two September 2026
 examples of the same rule: a DPAPI key that can't be decrypted on this
 machine reports `"unreadable"` rather than silently failing auth or crashing;
-the selection bar's "surface" picker stays informational only because nothing
-here actually measures a terminal-vs-desktop cost difference to adjust for.
+the (now-removed, §6) "surface" picker stayed informational only, never
+adjusting cost math, because nothing here actually measures a terminal-vs-
+desktop cost difference — and the "Send it" destination picker that replaced
+it never rewrites the copied prompt text per agent for the same reason: this
+app has no way to verify an agent-specific wrapper would be correct.
 
 ---
 
@@ -1174,15 +1221,102 @@ checked against Gemini, and verified by actually running the app end to end.
   running app rather than trusting the diff. Fixed by nulling the cache the
   same way every other mutating action already did.
 
-### Still open, ranked
+### Fixed in the frontend redesign pass (September 2026, part 2)
 
-**P1 — there is no first run.** A new user lands on "Windows" with hatched
-empty bars and no idea what the app is for. No one-screen explanation of the
-5-hour window, no guided setup, no "start here." *Do:* a first-run screen —
-what this is, pick your plan, sync a reading, done. Now the single biggest
-gap between "works" and "usable by someone who is not you" — everything
-ranked above it last pass (tests, security, most of the calibration work) is
-done.
+A visual and interaction pass over `web/`, referenced against Gemini before
+implementation per this repo's own rule for design decisions, then checked
+by running the app end to end (light and dark, live status-line data, and
+seeded sample data) rather than trusting the diff.
+
+- **P1 — there is no first run → fixed.** `viewDashboard()` now detects a
+  true first run (`unmetered && totals.projects === 0` — sample data counts
+  too, so loading the demo also clears this) and renders a dedicated
+  orientation card in place of the terse "No reading yet" line: what the two
+  windows are, in plain language, plus the two real next actions —
+  **Sync from Claude** (`manualEntry()`) and **See it with sample data**
+  (`seedDemo()`). Deliberately not a fabricated reading: Gemini's first draft
+  of this fix proposed a client-side "inject a simulated burst" button to
+  light up the dials cosmetically, which was rejected — it isn't tagged,
+  isn't real, and directly contradicts both P2 (demo data must be
+  distinguishable) and §11's "honest failure over silent guessing."
+- **Bench-instrument texture on the two headline gauges.** `.gauge-card`
+  (`styles.css`) adds a faint graph-paper graticule and four corner-reticle
+  brackets, drawn entirely from existing tokens (`--grid`, `--baseline`) via
+  `color-mix()` and layered `background-image` gradients — no new colour,
+  no new meaning, no image asset. Restricted to the Windows screen's two
+  ring cards on purpose: a texture used everywhere stops being a signal.
+  Explicitly *not* a second accent hue on the weekly ring (an earlier
+  Stitch-generated concept suggested one) — that would have repeated the
+  exact `--accent`/`--series-1` collision this file already documents as a
+  fixed bug above.
+- **A one-time "calibration sweep" on cold boot.** The two dashboard rings
+  and the weekly sparkline draw in from empty on the first paint of a
+  browser session only (`armGaugeSweep()`, gated by `sessionStorage`, called
+  once from `render()`) — every later navigation back to Windows renders at
+  the true value immediately. Degrades to an instant jump under
+  `prefers-reduced-motion` for free, since the global rule at the top of
+  `styles.css` already zeroes every transition duration on the page.
+- **A segmented token-budget bar on the Plan screen.** `segbar()` renders
+  the existing `budget_p50`/`budget_p95` breakdown (input / re-sent
+  conversation / output / thinking) as a single-hue, opacity-stepped bar
+  beside the table that already showed these numbers — a magnitude ramp in
+  pipeline order, not a fourth categorical colour, for the same reason as
+  above. No new backend field: it reads exactly what `/api/preview` already
+  returned. (A richer "cache-breakpoint" visualisation Gemini also proposed
+  was shelved — it assumes a system/context/query/output token segmentation
+  that `estimator.py` does not currently return.)
+- **A predicted-vs-actual scatter on the History screen.** `scatterCal()`
+  plots `acc[].predicted` against `.actual` for every completed step, with a
+  dashed reference line at perfect calibration, sitting above the existing
+  table rather than replacing it. Colour is status only (`--good`/
+  `--critical`, the same pair the table already used) and never the only way
+  to read a point — hovering a dot shows the same label the table row does.
+- **Setup screen left alone.** Gemini's draft also proposed a "diagnostic
+  probe" panel showing fabricated request latency and a rate-limit tier that
+  nothing in `server.py` or `providers.py` actually measures — rejected for
+  the same reason as the simulated first-run reading: a precise-looking
+  number this app didn't compute is worse than no number.
+
+### Frontend IA pivot (September 2026, part 3) — explicit user direction
+
+Direct, repeated user feedback, sharper the second time: the app read as
+"too code-centric," usage-limit percentages were "everywhere on my screen,"
+and model/agent selection needed to become optional and secondary rather
+than forced chrome above every prompt. Referenced against `gemini-call`
+(one question, not the `gemini-planner` subagent — the user asked for the
+lighter path specifically) before implementing; the answer's IA shape was
+adopted, its invented model names (`GPT-4o`, `o1`, a fictional "Account
+Tier" concept) and its proposal of a new drawer component were not — the
+composer already had inline Model/Effort pickers, so the fix was mostly
+subtractive, not a new component. See §6 for the mechanism.
+
+- **Default route changed from `#dashboard` to `#plan`.** The prompt
+  composer opens first; usage-limit tracking is reached via the nav like
+  any other screen, not shown by default.
+- **Nav reordered**: Plan a prompt, Projects, Windows, History, Setup —
+  Windows moved from first to third, deliberately not just one slot down,
+  since the sharper complaint was specifically about usage limits staying
+  in view.
+- **The persistent selection bar and sidebar mini-meter were removed
+  outright** — not demoted, not replaced with a smaller version of the same
+  idea. This directly supersedes the September 2026 (part 1) decision to add
+  `renderSelectionBar()`/`sideMeter()`; see §6 for what each piece of that
+  bar's functionality moved to instead (mostly: it already existed
+  elsewhere, and was simply duplicated).
+- **New "Send it" card** in the Plan screen's estimate output: an optional,
+  post-estimate destination choice (Claude Code / Codex / plain text) that
+  only changes a copy button's label and hint text, reusing the existing
+  `.tabs` component rather than a new toggle control. Threaded through to
+  the step-level copy button (`renderStep()`) via one shared `destination`
+  variable so the choice is consistent within a session.
+- This is a case where the repo's own prior documentation was working
+  against the user's actual, currently-expressed preference — worth naming
+  plainly rather than silently overwriting: the September 2026 (part 1)
+  selection-bar addition was itself a deliberate, reasoned design decision
+  at the time. Product direction changed; the old reasoning wasn't wrong
+  for what it was solving, it's just no longer what's wanted.
+
+### Still open, ranked
 
 **P3 — step status is still manual.** Turns attribute automatically, but you
 must click Start/Done for a step to have a window to attribute *to*. If you

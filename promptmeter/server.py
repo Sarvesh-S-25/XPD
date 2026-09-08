@@ -156,6 +156,19 @@ def api_providers_test(_m, _q, body):
     return providers.test((body or {}).get("provider"))
 
 
+@route("POST", "/api/providers/ollama/check")
+def api_providers_ollama_check(_m, _q, body):
+    """One button, on Setup: check for a local Ollama, and switch to it the
+    moment it's actually reachable — no other clicks, no config to type in.
+    Never installs Ollama itself or pulls a model; those are real downloads
+    the user runs on purpose, not something a button silently kicks off."""
+    r = providers.check_ollama((body or {}).get("base_url"))
+    if r["running"]:
+        model = r["models"][0] if r["models"] else None
+        providers.save_config({"active": "ollama", **({"model": model} if model else {})})
+    return r
+
+
 def _user_settings() -> dict:
     """The persistent top selection bar's state: model, effort, and surface —
     picked once and reused everywhere, instead of per prompt. `plan` is not

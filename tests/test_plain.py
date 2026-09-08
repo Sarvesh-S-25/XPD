@@ -51,6 +51,32 @@ class VendorBranchTest(unittest.TestCase):
         self.assertIn("session", pl["size"]["headline"].lower())
 
 
+class RiskContextTest(unittest.TestCase):
+    """A small worst-case size next to a high interruption risk used to read
+    as a contradiction ("Tiny" beside "expect to be cut off") with no
+    explanation that the two numbers measure different things. explain()
+    must bridge that specific mismatch and stay silent otherwise."""
+
+    def test_small_and_risky_gets_a_bridging_sentence(self):
+        pl = plain.explain(_est("anthropic", pp5_p50=1.0, pp5_p95=8.0,
+                                 risk_band="critical"), remaining_pp5=100.0)
+        self.assertEqual(pl["worst"]["band"], "good")
+        self.assertNotEqual(pl["risk_context"], "")
+        self.assertIn("nothing here caps", pl["risk_context"])
+
+    def test_small_and_safe_has_no_bridging_sentence(self):
+        pl = plain.explain(_est("anthropic", pp5_p50=1.0, pp5_p95=8.0,
+                                 risk_band="green"), remaining_pp5=100.0)
+        self.assertEqual(pl["risk_context"], "")
+
+    def test_large_and_risky_has_no_bridging_sentence(self):
+        # Big AND risky isn't the confusing case — only small-yet-risky is.
+        pl = plain.explain(_est("anthropic", pp5_p50=150.0, pp5_p95=250.0,
+                                 risk_band="critical"), remaining_pp5=1000.0)
+        self.assertEqual(pl["worst"]["band"], "critical")
+        self.assertEqual(pl["risk_context"], "")
+
+
 class SizeGenericTest(unittest.TestCase):
     def test_bands_increase_with_turns(self):
         bands = [plain.size_generic(t, None)["band"] for t in (1, 3, 10, 25, 60, 100)]

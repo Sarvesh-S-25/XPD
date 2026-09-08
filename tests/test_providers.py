@@ -56,6 +56,51 @@ class ProviderKeyStorageTest(DBTestCase):
         self.assertEqual(storage, "encrypted" if dpapi.AVAILABLE else "plaintext")
 
 
+class CheckOllamaTest(unittest.TestCase):
+    """check_ollama() — the Setup-page "check for Ollama" button's backend.
+    Never pulls a model or installs anything (see the function's docstring);
+    only two things are tested here: it correctly reports "not running"
+    against an address nothing is listening on, and it correctly reports
+    "running" plus the model list against a real (stdlib-only, loopback)
+    HTTP server standing in for Ollama's /api/tags endpoint."""
+
+    def test_unreachable_address_reports_not_running_without_raising(self):
+        r = providers.check_ollama("http://127.0.0.1:1")   # port 1: nothing listens
+        self.assertFalse(r["running"])
+        self.assertEqual(r["models"], [])
+        self.assertIsInstance(r["installed"], bool)         # PATH lookup, either answer is valid here
+
+    def test_reachable_daemon_reports_running_and_its_models(self):
+        import json as _json
+        import threading
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):                                # noqa: N802 (stdlib's own naming)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(_json.dumps(
+                    {"models": [{"name": "llama3.2:3b"}, {"name": "qwen2.5:7b"}]}).encode())
+
+            def log_message(self, *a):                      # keep test output quiet
+                pass
+
+        httpd = HTTPServer(("127.0.0.1", 0), Handler)
+        port = httpd.server_address[1]
+        t = threading.Thread(target=httpd.serve_forever, daemon=True)
+        t.start()
+        try:
+            r = providers.check_ollama(f"http://127.0.0.1:{port}")
+        finally:
+            httpd.shutdown()
+            t.join(timeout=2)
+            httpd.server_close()
+        self.assertTrue(r["installed"])
+        self.assertTrue(r["running"])
+        self.assertEqual(r["models"], ["llama3.2:3b", "qwen2.5:7b"])
+
+
 class LoadDotenvTest(unittest.TestCase):
     """load_dotenv() itself — the file-parsing half, independent of the DB."""
 
