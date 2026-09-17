@@ -233,9 +233,81 @@ function spark(points, w = 260, h = 44, key = 'pct7', arm = false) {
 
 /* ---------------------------------------------------------- dashboard */
 
+function activeProjectsCard(s) {
+  return `<div class="card mt16">
+    <div class="card-head"><h2>Active projects</h2>
+      <button class="btn-sm" onclick="go('projects')">See all</button></div>
+    ${s.active_projects.length ? s.active_projects.map(p => `
+      <div style="padding:9px 0;border-bottom:1px solid var(--grid)">
+        <div class="spread">
+          <a href="#" onclick="goProject(${p.id});return false"><strong>${esc(p.name)}</strong></a>
+          <span class="small muted tnum">${p.done}/${p.total} steps · ${usd(p.spent)}</span>
+        </div>
+        <div class="mt8">${progress(p.progress, p.progress >= 1)}</div>
+      </div>`).join('')
+    : `<div class="empty"><div class="big">No active projects</div>
+        <div class="small">Plan a prompt to create one.</div>
+        <div class="mt12"><button class="btn-primary" onclick="go('plan')">Plan a prompt</button>
+        <button style="margin-left:8px" onclick="seedDemo()">Load sample data</button></div></div>`}
+  </div>`;
+}
+
+async function setWindowsProvider(v) {
+  try {
+    await api('/api/settings', { method: 'PATCH', body: { windows_provider: v } });
+    S.status = null;
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
+// Claude window tracking is the assumed default only after it's actually
+// confirmed — showing 5-hour/weekly percentages by default regardless of
+// what the person is using PromptMeter for was a real complaint. A fresh
+// install (wp === '') asks once; wp === 'other' explains why there's
+// nothing to track instead of showing Claude numbers anyway.
+function renderWindowsGate(s, wp) {
+  if (wp === 'other') {
+    return `
+    <div class="page-head">
+      <div><h1>Windows</h1><div class="sub">Automatic window tracking is Claude-plan specific.</div></div>
+      <button class="btn-sm" onclick="go('plan')">Plan a prompt</button>
+    </div>
+    <div class="card">
+      <div class="label">Not tracked here</div>
+      <div class="hero">No plan window to measure</div>
+      <p class="small muted mt8" style="max-width:60ch">This page tracks the 5-hour and weekly limits on
+        a Claude Pro or Max plan, read from Claude Code's local sessions. There's no equivalent limit
+        for GPT, Gemini or a local model to show instead — Plan a prompt and Projects work the same with
+        any of them, just without a percent-of-window figure.</p>
+      <div class="row mt12">
+        <button class="btn-sm btn-primary" onclick="go('setup')">Connect a provider</button>
+        <button class="btn-sm" onclick="setWindowsProvider('claude')">Actually, I'm on a Claude plan</button>
+      </div>
+    </div>
+    ${activeProjectsCard(s)}`;
+  }
+  return `
+  <div class="page-head"><div><h1>Windows</h1><div class="sub">One question before this assumes anything.</div></div></div>
+  <div class="card">
+    <div class="label">Before this page shows anything</div>
+    <div class="hero">Are you on a Claude Pro or Max plan?</div>
+    <p class="small muted mt8" style="max-width:60ch">This screen tracks the 5-hour and weekly usage
+      limits Anthropic enforces on a Claude subscription, read automatically from Claude Code's local
+      sessions. If that's not what you're using PromptMeter for, there's nothing this page can show —
+      Plan a prompt and Projects work the same either way.</p>
+    <div class="row mt12">
+      <button class="btn-primary btn-sm" onclick="setWindowsProvider('claude')">Yes, track it</button>
+      <button class="btn-sm" onclick="setWindowsProvider('other')">No, I use something else</button>
+    </div>
+  </div>
+  ${activeProjectsCard(s)}`;
+}
+
 async function viewDashboard() {
   const s = await api('/api/status');
   S.status = s;
+  const wp = (s.settings || {}).windows_provider || '';
+  if (wp !== 'claude') return renderWindowsGate(s, wp);
   const hist = await api('/api/meter/history?hours=30').catch(() => ({ points: [] }));
   const f = s.five_hour, w = s.seven_day;
   const unmetered = f.used == null && w.used == null;
@@ -409,22 +481,7 @@ async function viewDashboard() {
       </div>`).join('')}
   </div>` : ''}
 
-  <div class="card mt16">
-    <div class="card-head"><h2>Active projects</h2>
-      <button class="btn-sm" onclick="go('projects')">See all</button></div>
-    ${s.active_projects.length ? s.active_projects.map(p => `
-      <div style="padding:9px 0;border-bottom:1px solid var(--grid)">
-        <div class="spread">
-          <a href="#" onclick="goProject(${p.id});return false"><strong>${esc(p.name)}</strong></a>
-          <span class="small muted tnum">${p.done}/${p.total} steps · ${usd(p.spent)}</span>
-        </div>
-        <div class="mt8">${progress(p.progress, p.progress >= 1)}</div>
-      </div>`).join('')
-    : `<div class="empty"><div class="big">No active projects</div>
-        <div class="small">Plan a prompt to create one.</div>
-        <div class="mt12"><button class="btn-primary" onclick="go('plan')">Plan a prompt</button>
-        <button style="margin-left:8px" onclick="seedDemo()">Load sample data</button></div></div>`}
-  </div>`;
+  ${activeProjectsCard(s)}`;
 }
 
 async function seedDemo() {
@@ -523,7 +580,7 @@ async function viewPlan() {
     <div class="card">
       <div class="field">
         <label>Your prompt</label>
-        <textarea id="p-prompt" style="min-height:210px" placeholder="Paste the prompt you were about to send to Claude…"></textarea>
+        <textarea id="p-prompt" style="min-height:210px" placeholder="Paste the prompt you were about to send…"></textarea>
       </div>
       <div class="field"><label>Model</label>
         <select id="p-model" onchange="onModelChange(this.value)">${(S.vendors || []).map(v => `
@@ -596,11 +653,11 @@ function onEffortChange(v) {
   api('/api/settings', { method: 'PATCH', body: { effort: v } }).catch(() => {});
 }
 
-async function doPreview() {
+async function doPreview(forcePlanner) {
   const prompt = document.getElementById('p-prompt').value.trim();
   if (!prompt) return toast('Paste a prompt first.', true);
   const out = document.getElementById('p-out');
-  out.innerHTML = `<div class="card"><div class="empty">Estimating…</div></div>`;
+  out.innerHTML = `<div class="card"><div class="empty">${forcePlanner ? 'Drafting steps…' : 'Estimating…'}</div></div>`;
   try {
     S.model = document.getElementById('p-model').value;
     S.effort = (document.getElementById('p-effort') || {}).value || 'medium';
@@ -615,7 +672,7 @@ async function doPreview() {
         workdir: document.getElementById('p-workdir').value,
         turn_cap: document.getElementById('p-cap').value || null,
         force: document.getElementById('p-force').value,
-        use_planner: (document.getElementById('p-planner') || {}).checked || false,
+        use_planner: forcePlanner || (document.getElementById('p-planner') || {}).checked || false,
       },
     });
     out.innerHTML = renderPreview(planPreview);
@@ -623,6 +680,16 @@ async function doPreview() {
   } catch (e) {
     out.innerHTML = `<div class="card"><div class="banner critical">${esc(e.message)}</div></div>`;
   }
+}
+
+// One-click recovery from "nothing to split on": re-runs the same estimate
+// with the connected model drafting the step list, instead of making the
+// user notice, tick "Draft the plan first" themselves, and press Estimate
+// again. Ticks the box too, so the state shown matches what just ran.
+function draftSplit() {
+  const box = document.getElementById('p-planner');
+  if (box) box.checked = true;
+  doPreview(true);
 }
 
 function renderPreview(p) {
@@ -635,6 +702,11 @@ function renderPreview(p) {
   const vb = (pl.verdict || {}).band || 'good';
   return `
   <div class="card">
+    ${e.ambiguous ? `<div class="banner warning" style="margin:-4px 0 14px">
+      <strong>Too little here to size with confidence.</strong> Nothing in this prompt
+      matched a recognisable kind of work, so the number below is a rough floor from a
+      default guess, not a real reading — add what it should do, in what format, or how
+      you'll know it's done, and it will sharpen up.</div>` : ''}
     <div class="banner ${vb === 'good' ? 'good' : vb === 'warning' ? 'warning' : 'critical'}"
          style="margin:-4px 0 14px">
       <div style="font-size:15px;font-weight:600">${esc((pl.verdict || {}).do || '')}</div>
@@ -762,7 +834,13 @@ function renderPreview(p) {
     <div class="card-head"><h2>${p.split ? `Split into ${p.steps.length} steps` : 'Run as one step'}</h2>
       <span class="hint">${p.stages} stage${p.stages === 1 ? '' : 's'}</span></div>
     <div class="banner ${p.split ? 'warning'
-      : /too big|needs splitting|unavailable/i.test(p.split_reason) ? 'critical' : 'good'}">${esc(p.split_reason)}</div>
+      : /too big|needs splitting|unavailable/i.test(p.split_reason) ? 'critical' : 'good'}">
+      <div>${esc(p.split_reason)}</div>
+      ${!p.split && p.can_draft ? `<div class="mt8">
+        <button class="btn-sm btn-primary" onclick="draftSplit()">Draft the steps now</button></div>`
+      : !p.split && !p.can_draft && /no model is connected/.test(p.split_reason) ? `<div class="mt8">
+        <button class="btn-sm" onclick="go('setup')">Connect a provider</button></div>` : ''}
+    </div>
     <div class="mt12">
       ${p.steps.map((s, i) => `
         <div class="spread" style="padding:8px 0;border-bottom:1px solid var(--grid)">
@@ -858,6 +936,16 @@ function modelLabel(id) {
   return m ? m.label : id;
 }
 
+// A Claude plan window only exists for Anthropic models — showing "% of a
+// 5-hour window" beside a GPT/Gemini/local run states a number that means
+// nothing for that model, the same leak plain.py's vendor branch already
+// guards against on the Plan screen (see explain()). Defaults to true so an
+// id we haven't loaded model metadata for yet doesn't suppress the figure.
+function isClaudeModel(id) {
+  const m = S.models.find(x => x.id === id);
+  return m ? m.vendor === 'anthropic' : true;
+}
+
 async function commitPlan() {
   if (!planPreview) return;
   const prompt = document.getElementById('p-prompt').value.trim();
@@ -893,17 +981,15 @@ async function viewProjects() {
     <button class="btn-primary" onclick="go('plan')">New project</button>
   </div>
 
-  <div class="grid grid-3">
+  <div class="grid grid-2">
     <div class="card"><div class="label">Projects</div>
       <div class="stat-value tnum">${totals.projects ?? '—'}</div>
       <div class="small muted">across every status</div></div>
-    <div class="card"><div class="label">Steps</div>
-      <div class="stat-value tnum">${totals.steps ?? '—'}</div>
-      <div class="small muted">${num(totals.iterations)} iterations logged</div></div>
     <div class="card"><div class="label">Spent</div>
       <div class="stat-value tnum">${usd(totals.spent)}</div>
       <div class="small muted">list-price equivalent · sample data excluded</div></div>
   </div>
+  ${costByProject(projects)}
 
   <div class="tabs mt16">
     ${['active', 'done', 'archived', 'all'].map(f =>
@@ -916,6 +1002,26 @@ async function viewProjects() {
         <div class="mt12"><button class="btn-primary" onclick="go('plan')">Plan a prompt</button>
           <button style="margin-left:8px" onclick="seedDemo()">Load sample data</button></div>
       </div></div>`}`;
+}
+
+// What each project has actually cost, side by side — replaces a "Steps"
+// count that mixed two different units (step count, iteration count) into
+// one card nobody could read at a glance. Bars scale to the priciest project
+// shown so relative spend is visible even when every number is small.
+function costByProject(projects) {
+  const withSpend = projects.filter(p => p.spent > 0);
+  if (!withSpend.length) return '';
+  const sorted = [...withSpend].sort((a, b) => b.spent - a.spent).slice(0, 8);
+  const max = Math.max(...sorted.map(p => p.spent), 0.01);
+  return `<div class="card mt16">
+    <div class="label">Cost by project</div>
+    <div class="mt8">${sorted.map(p => `
+      <div class="driver" style="cursor:pointer" onclick="goProject(${p.id})">
+        <span class="bar" style="width:${Math.max(8, p.spent / max * 160)}px;background:var(--accent)"></span>
+        <span style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}${p.is_demo ? ' <span class="muted">(sample)</span>' : ''}</span>
+        <span class="tnum muted">${usd(p.spent)}</span>
+      </div>`).join('')}</div>
+  </div>`;
 }
 
 function projCard(p) {
@@ -981,6 +1087,8 @@ async function viewProject() {
   const p = await api(`/api/projects/${S.id}`);
   S.cache.project = p;
   const done = p.progress >= 1;
+  const running = p.steps.find(s => s.status === 'running');
+  const nextPending = p.steps.find(s => s.status === 'pending');
   return `
   <div class="page-head">
     <div style="min-width:0">
@@ -993,6 +1101,8 @@ async function viewProject() {
         ${p.workdir ? `<span class="chip mono">${esc(p.workdir)}</span>` : ''}</div>
     </div>
     <div class="row">
+      ${!running && nextPending
+        ? `<button class="btn-sm btn-primary" onclick="setStepStatus(${nextPending.id},'running')">Start next step</button>` : ''}
       ${p.status === 'active'
         ? `<button class="btn-sm" onclick="setProjStatus(${p.id},'done')">Mark done</button>`
         : `<button class="btn-sm" onclick="setProjStatus(${p.id},'active')">Reopen</button>`}
@@ -1012,7 +1122,7 @@ async function viewProject() {
           : p.spent > p.est ? `<span style="color:var(--serious)">${usd(p.spent)}</span>` : usd(p.spent)}
           <span class="muted">of ~${usd(p.est)} (worst ${usd(p.est_p95)})</span>
           ${p.spent > p.est_p95 && p.est_p95 > 0 ? '<span class="chip critical" style="margin-left:6px">past worst case</span>' : ''}</dd>
-        <dt>Window used</dt><dd>${p.pp5_spent.toFixed(1)}% of a 5-hour window</dd>
+        ${isClaudeModel(p.model) ? `<dt>Window used</dt><dd>${p.pp5_spent.toFixed(1)}% of a 5-hour window</dd>` : ''}
       </dl>
     </div>
     <div class="mt12">${progress(p.progress, done)}</div>
@@ -1049,6 +1159,10 @@ function renderStep(s, i, p) {
   <div class="step ${s.status === 'running' ? 'active' : ''} ${open ? 'open' : ''}">
     <div class="step-head" onclick="toggleStep(${s.id})" style="cursor:pointer">
       <div class="row" style="min-width:0;align-items:flex-start">
+        <input type="checkbox" title="Mark done" style="width:auto;margin-top:2px"
+          ${s.status === 'done' ? 'checked' : ''}
+          onclick="event.stopPropagation()"
+          onchange="setStepStatus(${s.id}, this.checked ? 'done' : 'pending')">
         <span class="step-num">${i + 1}</span>
         <div style="min-width:0">
           <div class="row wrap">
@@ -1126,7 +1240,7 @@ function renderStep(s, i, p) {
             <div style="min-width:0;flex:1">
               <div>${esc(it.summary || '(no summary recorded)')}</div>
               <div class="small muted tnum mt8">${tokens(it.out_tokens)} out · ${usd(it.cost_usd)}
-                · ${it.pp5_delta.toFixed(1)}% of a 5h window · ${ago(it.created_at)}</div>
+                ${isClaudeModel(it.model) ? `· ${it.pp5_delta.toFixed(1)}% of a 5h window ` : ''}· ${ago(it.created_at)}</div>
             </div>
           </div>`).join('')}</div>
       </div>` : `<div class="small muted mt16">No iterations logged yet.</div>`}
@@ -1151,7 +1265,7 @@ function toggleStep(id) {
 async function copyNext(id) {
   const s = (S.cache.project.steps || []).find(x => x.id === id);
   if (!s) return;
-  try { await navigator.clipboard.writeText(s.next_prompt); toast('Prompt copied — paste it into Claude.'); }
+  try { await navigator.clipboard.writeText(s.next_prompt); toast('Prompt copied.'); }
   catch { toast('Could not copy. Select the text and copy manually.', true); }
 }
 
@@ -1398,7 +1512,7 @@ async function viewHistory() {
         <td>${modelChip(m.model, m.label)}</td>
         <td class="num">${m.iters}</td><td class="num">${tokens(m.out_tokens)}</td>
         <td class="num">${tokens(m.cache_read)}</td><td class="num">${usd(m.cost)}</td>
-        <td class="num">${m.pp5.toFixed(1)}%</td></tr>`).join('')}</tbody></table>`
+        <td class="num">${isClaudeModel(m.model) ? m.pp5.toFixed(1) + '%' : '—'}</td></tr>`).join('')}</tbody></table>`
       : `<div class="empty">
           <div class="big">Nothing logged yet</div>
           <div class="small">Run a project and log an iteration, or load sample data to see the shape of this table.</div>
@@ -1494,40 +1608,20 @@ async function viewSetup() {
 
   <div class="banner ${banner[0]}">${banner[1]}</div>
 
-  <div class="card mt16">
-    <div class="card-head"><h2>Automatic tracking</h2>
-      <span class="hint">works for the terminal and the desktop app · nothing to configure</span></div>
-
-    <p class="small">Claude Code writes every turn it runs to a session file on this machine, with the
-      exact token counts. PromptMeter reads those files. That covers <strong>both</strong> the terminal
-      and the desktop app, needs no settings change, and updates by itself every 20 seconds.</p>
-
-    <div class="grid grid-3 mt16" style="gap:12px">
-      <div><div class="label">Session files found</div>
-        <div class="stat-value tnum">${w.files}</div>
-        <div class="small muted">${w.root_exists ? 'in ' + esc(w.root) : 'folder not found yet'}</div></div>
-      <div><div class="label">Turns recorded</div>
-        <div class="stat-value tnum">${num(w.turns)}</div>
-        <div class="small muted">${w.sessions} session${w.sessions === 1 ? '' : 's'}</div></div>
-      <div><div class="label">Last checked</div>
-        <div class="stat-value">${w.last_scan ? ago(w.last_scan) : '—'}</div>
-        <div class="small muted">${w.running ? 'watching continuously' : 'watcher stopped'}</div></div>
+  <details class="card mt16">
+    <summary><strong>Automatic tracking detail</strong>
+      <span class="small muted">— ${num(w.turns)} turns, ${w.sessions} session${w.sessions === 1 ? '' : 's'}, last checked ${w.last_scan ? ago(w.last_scan) : 'never'}</span></summary>
+    <p class="small mt12">Claude Code writes every turn to a session file on this machine; PromptMeter
+      reads those files, covering both the terminal and the desktop app, with nothing to configure.</p>
+    <div class="row mt8">
+      <button class="btn-sm" onclick="doScan(false)">Check now</button>
+      <button class="btn-sm" onclick="doScan(true)">Re-read everything</button>
     </div>
-
-    <div class="row mt16">
-      <button onclick="doScan(false)">Check now</button>
-      <button onclick="doScan(true)">Re-read everything</button>
-    </div>
-
-    ${w.turns === 0 ? `<div class="banner warning mt16">
-      <strong>No turns found yet.</strong> ${w.root_exists
-        ? 'The folder exists but has no session files with usage in them. Send one message in Claude Code — terminal or desktop app — then press “Check now”.'
-        : `Nothing at <span class="mono">${esc(w.root)}</span>. That folder appears the first time you use Claude Code on this machine.`}
-    </div>` : `<div class="banner good mt16">
-      <strong>Tracking is on.</strong> ${num(w.turns)} turns across ${w.sessions} session${w.sessions === 1 ? '' : 's'}.
-      Nothing else is needed — the windows on the Windows page update on their own.
-    </div>`}
-
+    ${w.turns === 0 ? `<div class="banner warning mt12">
+      ${w.root_exists
+        ? 'The folder exists but has no session files with usage in them yet. Send one message in Claude Code, then press “Check now”.'
+        : `Nothing at <span class="mono">${esc(w.root)}</span> yet — that folder appears the first time you use Claude Code on this machine.`}
+    </div>` : ''}
     ${w.projects && w.projects.length ? `<details class="mt12">
       <summary>Which folders it is seeing</summary>
       <table><thead><tr><th>Project folder</th><th class="num">Turns</th>
@@ -1536,45 +1630,14 @@ async function viewSetup() {
         <td class="num">${num(pr.turns)}</td><td class="num">${usd(pr.cost)}</td>
         <td class="num">${ago(pr.last)}</td></tr>`).join('')}</tbody></table>
     </details>` : ''}
-  </div>
-
-  <div class="card">
-    <div class="card-head"><h2>How big is your window?</h2>
-      <span class="hint">${c.capacity_basis === 'measured' ? 'measured — nothing to do' : 'one reading pins this exactly'}</span></div>
-
-    <p class="small">Tracking gives exact dollars of work. Turning that into “percent of your window”
-      needs to know how big your window is, and Anthropic doesn’t publish that number. So pick your
-      plan for a starting estimate, then let one real reading replace it.</p>
-
-    <div class="field" style="max-width:320px">
-      <label>Your plan</label>
-      <select onchange="setPlan(this.value)">
-        ${(c.plans || []).map(pl => `<option value="${pl.id}" ${pl.id === c.plan ? 'selected' : ''}>${esc(pl.label)}</option>`).join('')}
-      </select>
-    </div>
-
-    <div class="banner ${c.capacity_basis === 'measured' ? 'good' : ''}">
-      ${c.capacity_basis === 'measured'
-        ? `<strong>Already measured.</strong> Your window works out to about
-           ${usd(c.capacity_usd5)} of list-price work per 5 hours. This came from a real reading, so
-           the percentages are yours, not a guess.`
-        : `<strong>Pin it exactly, once.</strong> Open your usage view — the ring next to the model
-           picker in the desktop app, or <span class="mono">/usage</span> in the terminal — and type
-           the two percentages in. PromptMeter divides them into the spend it has already recorded
-           and solves for your real window size. You never have to do it again.`}
-    </div>
-    <div class="row mt12"><button class="${c.capacity_basis === 'measured' ? '' : 'btn-primary'}"
-      onclick="manualEntry()">${c.capacity_basis === 'measured' ? 'Re-calibrate' : 'Calibrate now'}</button></div>
-  </div>
+  </details>
 
   <div class="card">
     <div class="card-head"><h2>Live status line</h2>
       <span class="hint">terminal only · optional extra precision</span></div>
 
-    <p class="small">On top of the automatic tracking, the terminal version of Claude Code can hand
-      PromptMeter the exact percentages Anthropic enforces on, second by second. This is optional —
-      tracking already works without it — and it does nothing in the desktop app, which has no status
-      line to attach to.</p>
+    <p class="small">Optional extra precision for the terminal: Claude Code hands PromptMeter the exact
+      percentages, second by second, instead of the estimate automatic tracking already gives you.</p>
 
     <div class="steps-num mt12">
       <div class="stepn">
@@ -1827,15 +1890,6 @@ async function doScan(full) {
     const r = await api('/api/setup/scan', { method: 'POST', body: { full: !!full } });
     toast(r.added ? `Found ${r.added} new turn${r.added === 1 ? '' : 's'}.`
                   : `Up to date — ${num(r.turns)} turns recorded.`);
-    S.status = null;
-    render();
-  } catch (e) { toast(e.message, true); }
-}
-
-async function setPlan(plan) {
-  try {
-    await api('/api/setup/plan', { method: 'POST', body: { plan } });
-    toast('Plan set. Percentages recalculated.');
     S.status = null;
     render();
   } catch (e) { toast(e.message, true); }

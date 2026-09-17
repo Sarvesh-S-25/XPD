@@ -73,15 +73,25 @@ def preview(prompt: str, *, model: str = "claude-sonnet-5", workdir: str = "",
         items = _items_from_plan(drafted["items"])
     else:
         items = segmenter.segment(prompt) if want_split else []
+    # A connected model that could draft the split, but wasn't asked to for
+    # this estimate — surfaced so the frontend can offer one specific action
+    # ("draft it now") instead of a dead end, without spending an API call the
+    # user didn't ask for on this click.
+    can_draft = providers.config()["active"] != "heuristic"
     if want_split and len(items) < 2:
         want_split = False
         if drafted and not drafted.get("ok"):
             reason = ("This needs splitting, but the planner was unavailable and the wording has "
                       "no separable actions. Fix the planner, or list the steps yourself.")
+        elif not drafted and can_draft:
+            reason = ("This looks too big for one run, but it's written as a single sentence so "
+                      "the built-in splitter has nothing to cut on. A connected model can read it "
+                      "and draft the steps instead of you doing it by hand.")
         elif not drafted:
-            reason = ("This looks too big for one run, but it is written as a single sentence so "
-                      "there is nothing to split on. Tick “Draft the plan first”, or write the "
-                      "work out as a list.")
+            reason = ("This looks too big for one run, but it's written as a single sentence so "
+                      "the built-in splitter has nothing to cut on, and no model is connected to "
+                      "draft one. Connect a provider on the Setup page, or write the work out as "
+                      "a list yourself.")
         else:
             reason = "Prompt has no separable actions — running as one step."
         items = []
@@ -125,6 +135,7 @@ def preview(prompt: str, *, model: str = "claude-sonnet-5", workdir: str = "",
         "planner": drafted,
         "split": want_split,
         "split_reason": reason,
+        "can_draft": can_draft and not (drafted and drafted.get("ok")),
         "steps": steps,
         "stages": n_stages,
         "savings": sav,
@@ -294,6 +305,10 @@ def _done_when(step: dict) -> str:
     return oracles.KINDS.get(kind, kind)
 
 
+def _norm_dir(p: str) -> str:
+    return (p or "").strip().rstrip("/\\").replace("\\", "/").lower()
+
+
 def attributed(step: dict) -> dict:
     """Work the watcher recorded while this step was running.
 
@@ -303,7 +318,18 @@ def attributed(step: dict) -> dict:
     did showed $0.00. A turn belongs to whichever step was running when it was
     recorded; where windows overlap it goes to the one that started most
     recently, so nothing is double counted.
+
+    Sample/demo steps never get real turns attributed to them — their
+    fabricated started_at/ended_at windows can coincide with genuine Claude
+    Code activity on this machine, which used to leak real cost into demo
+    projects. And when the project has a working folder set, only turns whose
+    transcript `cwd` is inside that folder count — otherwise any unrelated
+    work happening anywhere on the machine during the same window was being
+    attributed here too, which inflated "spent" on real projects whenever
+    something else was open in Claude Code at the same time.
     """
+    if step.get("is_demo"):
+        return {"cost": 0.0, "turns": 0, "out_tokens": 0, "in_tokens": 0}
     if not step.get("started_at"):
         return {"cost": 0.0, "turns": 0, "out_tokens": 0, "in_tokens": 0}
     start = float(step["started_at"])
@@ -317,13 +343,21 @@ def attributed(step: dict) -> dict:
     if nxt:
         end = min(end, float(nxt))
 
-    r = db.row(
-        """SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS c,
-                  COALESCE(SUM(out_tokens),0) AS o,
-                  COALESCE(SUM(in_tokens + cache_read + cache_1h + cache_5m),0) AS i
-           FROM turns WHERE ts >= ? AND ts <= ?""", (start, end)) or {}
-    return {"cost": round(float(r.get("c") or 0), 6), "turns": int(r.get("n") or 0),
-            "out_tokens": int(r.get("o") or 0), "in_tokens": int(r.get("i") or 0),
+    rows = db.rows(
+        """SELECT cwd, cost_usd, out_tokens, in_tokens, cache_read, cache_1h, cache_5m
+           FROM turns WHERE ts >= ? AND ts <= ?""", (start, end))
+
+    workdir = _norm_dir(db.scalar(
+        "SELECT workdir FROM projects WHERE id=?", (step["project_id"],), "") or "")
+    if workdir:
+        rows = [r for r in rows if _norm_dir(r.get("cwd", "")).startswith(workdir)]
+
+    n = len(rows)
+    c = sum(float(r.get("cost_usd") or 0) for r in rows)
+    o = sum(int(r.get("out_tokens") or 0) for r in rows)
+    i = sum(int(r.get("in_tokens") or 0) + int(r.get("cache_read") or 0)
+            + int(r.get("cache_1h") or 0) + int(r.get("cache_5m") or 0) for r in rows)
+    return {"cost": round(c, 6), "turns": n, "out_tokens": o, "in_tokens": i,
             "from": start, "to": end}
 
 

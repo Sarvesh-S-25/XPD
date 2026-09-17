@@ -169,6 +169,29 @@ def api_providers_ollama_check(_m, _q, body):
     return r
 
 
+def _windows_provider() -> str:
+    """Whether the Windows page's Claude 5-hour/weekly tracker should be the
+    default view — '' (never asked), 'claude', or 'other'.
+
+    Automatic tracking runs regardless (it's passive and free), but showing
+    Claude-plan percentages as the assumed default for anyone who opens this
+    app was a real complaint: PromptMeter also works with GPT/Gemini/local
+    models, for which there's no equivalent window to measure. An install
+    that already has real Claude usage (turns tailed, or a manual reading
+    logged) is answered automatically so an existing user is never asked;
+    only a genuinely fresh install sees the question.
+    """
+    wp = db.get_setting("windows_provider", "")
+    if wp:
+        return wp
+    has_signal = (db.scalar("SELECT COUNT(*) FROM turns", (), 0) or 0) > 0 or \
+                 (db.scalar("SELECT COUNT(*) FROM meter WHERE session_id NOT IN ('demo')", (), 0) or 0) > 0
+    if has_signal:
+        db.set_setting("windows_provider", "claude")
+        return "claude"
+    return ""
+
+
 def _user_settings() -> dict:
     """The persistent top selection bar's state: model, effort, and surface —
     picked once and reused everywhere, instead of per prompt. `plan` is not
@@ -180,6 +203,7 @@ def _user_settings() -> dict:
         # transcript format) — Cowork/browser usage is real but untrackable,
         # never a selectable "surface" implying it's measured.
         "surface": db.get_setting("default_surface", "terminal"),
+        "windows_provider": _windows_provider(),
     }
 
 
@@ -190,13 +214,16 @@ def api_settings_get(_m, _q, _b):
 
 @route("PATCH", "/api/settings")
 def api_settings_patch(_m, _q, body):
-    fields = {k: v for k, v in (body or {}).items() if k in ("model", "effort", "surface")}
+    fields = {k: v for k, v in (body or {}).items()
+              if k in ("model", "effort", "surface", "windows_provider")}
     if "effort" in fields and fields["effort"] not in pricing.EFFORTS:
         raise Err(400, "Unknown effort.")
     if "surface" in fields and fields["surface"] not in ("terminal", "desktop"):
         raise Err(400, "Unknown surface — tracking can only see terminal and desktop sessions.")
+    if "windows_provider" in fields and fields["windows_provider"] not in ("", "claude", "other"):
+        raise Err(400, "Unknown windows_provider.")
     for k, v in fields.items():
-        db.set_setting(f"default_{k}", v)
+        db.set_setting(k if k == "windows_provider" else f"default_{k}", v)
     return _user_settings()
 
 
@@ -255,7 +282,11 @@ def api_project(m, _q, _b):
         s["risk_drivers"] = json.loads(s["risk_drivers"] or "[]")
         s["iterations"] = db.rows(
             "SELECT * FROM iterations WHERE step_id=? ORDER BY n", (s["id"],))
-        s["spent"] = round(sum(i["cost_usd"] for i in s["iterations"]), 4)
+        # Same combined ledger project_progress() sums for the project total —
+        # this used to be logged-iterations only, so a step's own number and
+        # the project's "Spent" total could disagree whenever the watcher had
+        # attributed turns the step's iteration log never saw.
+        s["spent"] = planner.step_spend(s)["spent"]
         s["next_prompt"] = planner.next_prompt(s)
     p["steps"] = steps
     p.update(planner.project_progress(pid))

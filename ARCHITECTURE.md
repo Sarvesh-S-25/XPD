@@ -1316,12 +1316,102 @@ subtractive, not a new component. See §6 for the mechanism.
   at the time. Product direction changed; the old reasoning wasn't wrong
   for what it was solving, it's just no longer what's wanted.
 
+### Fixed in the September 2026 pass, part 4 — user-reported issues
+
+Direct user feedback across Plan a prompt, Projects and Windows/Setup, worked
+through without Gemini (its CLI wasn't reachable in this environment — a
+setup problem, noted rather than worked around) but checked by running the
+app end to end and driving each screen in a real browser, plus new
+regression tests for the two backend bugs.
+
+- **Real usage could get attributed to a sample project, or to a different
+  project entirely — HIGH → fixed.** `planner.attributed()` matched a
+  step's `started_at`/`ended_at` window against *every* turn the watcher had
+  ever seen, with no filter beyond time. Two consequences: a demo project's
+  fabricated timestamps could coincide with genuine Claude Code activity on
+  the machine and inherit its real cost (seen live: a sample step showing
+  "$24.41 of ~$0.14 (worst $0.43)"), and a real project with unrelated work
+  running in the same window could claim turns that were never its own.
+  `attributed()` now returns zero for any `is_demo` step outright, and when
+  the project has a working folder set, only turns whose transcript `cwd` is
+  inside it count (`tests/test_planner.py`).
+- **A step's own "spent" number could disagree with the project total it
+  feeds — MED → fixed.** `api_project()` computed a step's displayed
+  `spent` from logged iterations only; `project_progress()`'s project-level
+  total summed `step_spend()`'s combined logged+watcher view. Same step,
+  two different numbers, visible on the same page. Both now read
+  `step_spend()`.
+- **A prompt with no real signal got a confident verdict anyway — related to
+  A2, mitigated.** `classify()` silently fell back to `multi_file_feature`
+  (12–40 turns) for any prompt that matched no class keyword at all, then
+  ran the full risk-scoring path on it with the same presentation as a real
+  reading — a bare word like "swiggy" and a five-word request with a
+  keyword match could land on visibly different verdicts with no way to
+  tell that one of them was a guess. `classify_detail()` now returns
+  `ambiguous`, threaded onto the estimate and shown as a banner on the Plan
+  screen ("too little here to size with confidence…") rather than presented
+  as a reading. Doesn't touch A2 itself — the priors are still estimates —
+  but stops the symptom from reading as a bug in the arithmetic.
+- **Window-percent leaked past `plain.py`'s vendor guard — LOW → fixed.**
+  `explain()` already keeps "% of your 5-hour window" to Anthropic models on
+  the Plan screen's own estimate, but the same figure was unconditional on
+  the project detail page (`Window used`), the per-iteration rows, and the
+  History "% of 5h window" column — all three showed a Claude-plan number
+  next to a GPT/Gemini/local run. Gated behind a new `isClaudeModel()`
+  helper in `web/app.js`.
+- **"Nothing to split on" was a dead end — LOW → fixed.** When the built-in
+  segmenter found no separable actions, the reason text said to tick "Draft
+  the plan first" and stop — requiring the user to notice, check a box
+  elsewhere on the same form, and press Estimate again. `preview()` now
+  returns `can_draft` (a provider is connected but wasn't asked for this
+  estimate), and the banner offers a one-click **Draft the steps now**
+  button, or **Connect a provider** when none is configured. Deliberately
+  not automatic even when a provider is connected — silently spending an
+  API call the user didn't ask for on a plain Estimate click would violate
+  the same opt-in the "Draft a plan for every prompt automatically" setting
+  already establishes.
+- **P3 — step status is still manual → partially addressed.** Added the
+  fix ARCHITECTURE already named as the option here: a **Start next step**
+  button at the top of the project detail page, plus an inline checkbox on
+  each collapsed step so marking one done no longer requires opening it.
+  Inferring a step as started from its first matching turn (the other half
+  of the original suggestion) is not done — it would need the same
+  workdir-matching this pass just added to `attributed()` to be safe, and
+  is real enough scope to track as its own item rather than fold in here.
+- **Projects screen's "Steps" summary card was unreadable — LOW → fixed.**
+  One stat mixed a step count and an iteration count into a single number
+  ("8" next to "17 iterations logged") that didn't correspond to anything a
+  user could act on. Removed; replaced with a **Cost by project** bar list
+  so "what has each project cost" — the thing the removed card was
+  standing in for — is answerable at a glance instead.
+- **Windows/Setup assumed a Claude plan as the default, unconditionally.**
+  Not a named backlog item before now, but the same category as the
+  frontend IA pivot above: direct feedback that the app "feels like a
+  Claude-or-nothing environment." The Windows page now asks once — "Are you
+  on a Claude Pro or Max plan?" — before showing any tracker, and an
+  install that already has real signal (turns tailed, or a manual reading
+  on file) is answered automatically so an existing user is never
+  interrupted (`_windows_provider()` in `server.py`). Answering "something
+  else" shows a short explanation instead of Claude numbers, plus a link to
+  Setup's Connect-a-provider section, which is genuinely provider-agnostic
+  already. Setup's "Automatic tracking" card — three stats and two buttons
+  that were the first thing under the fold — collapsed into a one-line
+  `<details>` disclosure; "How big is your window? → Your plan" (a manual
+  override of a number Sync-from-Claude already solves for free) was
+  removed outright rather than demoted, the same call the September 2026
+  part 3 pivot made for the persistent selection bar. README's nine-step
+  walkthrough updated to match (step 2).
+
 ### Still open, ranked
 
-**P3 — step status is still manual.** Turns attribute automatically, but you
-must click Start/Done for a step to have a window to attribute *to*. If you
-never click Start, nothing attaches. *Do:* infer a step as started on its
-first matching turn, or a "start next step" button one click from the top.
+**P3 — step status is still manual, one-click-closer.** Turns attribute
+automatically, but you must click Start/Done for a step to have a window to
+attribute *to*. A **Start next step** button and inline per-step checkboxes
+now ship (September 2026 pass, part 4) so that click is one tap from the top
+of the project instead of buried in an expanded step. Still not done: if you
+never click Start at all, nothing attaches — inferring a step as started
+from its first matching turn (now that `attributed()` can scope a match to
+the project's workdir) is the remaining half of the original fix.
 
 **E2 — never run on Windows, partially verified.** The September 2026 pass
 ran the app directly (`python -m promptmeter`) and drove the UI in a real
@@ -1334,8 +1424,11 @@ click through `start.bat` and the terminal steps in `README.md` for real.
 **A2 — the priors are estimates, not measurements.** `build_app = 35/120
 turns` came from judgement, not a dataset (§8, `priors.json`). Shrinkage fixes
 it as you log runs, but the first dozen estimates are only as good as those
-seven rows. *Do:* replace the hand-guessed priors with real measurements, now
-that the shrinkage/calibration machinery to actually use them exists.
+seven rows. September 2026 part 4 added `classify_detail()`'s `ambiguous`
+flag, which stops a no-signal prompt from *presenting* a guess as a reading —
+it does not make the guess itself any better. *Do:* replace the hand-guessed
+priors with real measurements, now that the shrinkage/calibration machinery
+to actually use them exists.
 
 **P4 — the app plans work it cannot run.** It tells you what to send and
 tracks what happened, but you paste prompts yourself. Deliberate (no API key

@@ -97,6 +97,22 @@ CLASS_RANK = ["qa_explain", "single_file_edit", "data_task", "research_report",
 
 
 def classify(prompt: str) -> str:
+    return classify_detail(prompt)["task_class"]
+
+
+def classify_detail(prompt: str) -> dict:
+    """classify(), plus whether it actually found a signal to go on.
+
+    A prompt that matches nothing (best_score 0 — a bare word or two, no verb,
+    no named artefact) still has to fall back to some class for the arithmetic
+    to run, but that fallback is a guess, not a reading of the prompt. Two
+    equally underspecified prompts can land on wildly different verdicts
+    depending on which one happens to brush past a keyword pattern — that is
+    not the estimator being wrong, it is the estimator being asked to size
+    something that was never described. `ambiguous` surfaces that distinction
+    so the UI can say so, instead of presenting a guess with the same
+    confidence as a real reading.
+    """
     p = prompt.strip()
     best, best_score = "multi_file_feature", 0.0
     for name, sigs in CLASS_SIGNALS.items():
@@ -107,6 +123,7 @@ def classify(prompt: str) -> str:
         if score > best_score:
             best, best_score = name, score
     cls = best if best_score >= 1.5 else "multi_file_feature"
+    ambiguous = best_score < 1.5
 
     # Scope escalation: "fix everything in the codebase and keep going" reads as a
     # single-file edit by keyword, but it is a repo-wide job. Unbounded language
@@ -114,7 +131,10 @@ def classify(prompt: str) -> str:
     if SCOPE_WIDE.search(p) and len(OPEN_ENDED.findall(p)) >= 1:
         if CLASS_RANK.index(cls) < CLASS_RANK.index("refactor"):
             cls = "refactor"
-    return cls
+            ambiguous = False   # the escalation itself is a real signal
+
+    return {"task_class": cls, "signal_score": round(best_score, 2),
+            "ambiguous": ambiguous, "words": len(p.split())}
 
 
 # ---------------------------------------------------------------- risk
@@ -245,7 +265,8 @@ def estimate(prompt: str, *, model: str = "claude-sonnet-5", task_class: str | N
     """
     from . import meter
 
-    tc = task_class or classify(prompt)
+    cdetail = None if task_class else classify_detail(prompt)
+    tc = task_class or cdetail["task_class"]
     prof = learning.profile(tc, model)          # priors blended with observed history
     prompt_tokens = count_tokens(prompt)
     base = base_context + prompt_tokens
@@ -313,6 +334,7 @@ def estimate(prompt: str, *, model: str = "claude-sonnet-5", task_class: str | N
         "confidence": prof["confidence"],
         "calibration": cal,
         "features": feats,
+        "ambiguous": bool(cdetail and cdetail["ambiguous"]),
     }
 
 

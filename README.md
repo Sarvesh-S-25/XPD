@@ -75,9 +75,11 @@ Nine steps. Only the first two are required.
 Double-click `start.bat`. The browser opens at `127.0.0.1:7777`. Nothing to
 install beyond Python.
 
-### 2 — Tell it your plan
-**Setup → How big is your window? → Your plan.** One dropdown. This is what
-turns "dollars of work" into "percent of your limit."
+### 2 — Say what you're tracking
+**Windows** asks once, on first visit: are you on a Claude Pro or Max plan?
+Say yes and it tracks your 5-hour/weekly windows from a sensible default size;
+say no (or you use GPT/Gemini/a local model instead) and it skips straight to
+Plan a prompt and Projects, which work the same either way.
 
 ### 3 — Sync one reading *(recommended, 10 seconds)*
 **Windows → Sync from Claude.** Open Claude's own usage view — the ring beside
@@ -129,7 +131,7 @@ you find out.
 | **Plan a prompt** | What will this cost in tokens and dollars, how risky is it, does it need splitting? |
 | **Projects** | What am I working on, how far along is each one, what has it cost? |
 | **History** | What has PromptMeter learned about my usage, and were its estimates right? |
-| **Setup** | What tracking can see, calibration, connecting a provider, and the live status line. |
+| **Setup** | Connecting a provider to draft your steps, the live status line, and your data. |
 
 A persistent bar above every screen — surface, plan, model, reasoning effort —
 is set once and applies to every new plan, so you don't re-pick it per prompt.
