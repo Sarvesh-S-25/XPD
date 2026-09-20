@@ -14,12 +14,29 @@ async function api(path, opts = {}) {
   // on GET /api/status — a forged cross-origin POST cannot set a custom
   // header, so this is what makes that request rejected rather than acted on.
   if (method !== 'GET' && S.csrfToken) headers['X-PromptMeter-Token'] = S.csrfToken;
-  const r = await fetch(path, {
-    method,
-    headers,
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
-  });
+  let r;
+  try {
+    r = await fetch(path, {
+      method,
+      headers,
+      body: opts.body ? JSON.stringify(opts.body) : undefined,
+    });
+  } catch {
+    // fetch() only rejects when nothing answered at all — surface that in words
+    // instead of the browser's bare "Failed to fetch".
+    throw new Error('Can’t reach PromptMeter — is it still running? Start it again and retry.');
+  }
   const j = await r.json().catch(() => ({ error: 'Bad response' }));
+  // The token is per server process. Restarting PromptMeter with a tab left
+  // open made every action fail with "Missing or wrong CSRF token" until a
+  // manual reload — pick up the new token and retry the request once instead.
+  if (r.status === 403 && /CSRF/.test(j.error || '') && !opts._retried) {
+    const s = await fetch('/api/status').then(x => x.json()).catch(() => null);
+    if (s && s.csrf_token && s.csrf_token !== S.csrfToken) {
+      S.csrfToken = s.csrf_token;
+      return api(path, { ...opts, _retried: true });
+    }
+  }
   if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
 }
@@ -563,6 +580,96 @@ async function saveManual() {
   } catch (e) { toast(e.message, true); }
 }
 
+/* ---------------------------------------------------------- accordion */
+
+// The features accordion from the USAvionix reference: hover (mouse), focus
+// (keyboard) or a first tap (touch) grows one card and compresses the rest;
+// activating the already-open card follows its link. Art is static inline SVG
+// (constants below, never user data), coloured through CSS classes so it takes
+// each card's --hue.
+const ACC_ART = {
+  gauge: `<svg viewBox="0 0 400 480" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <circle class="s dim" cx="200" cy="190" r="128" stroke-width="1"/>
+    <circle class="s" cx="200" cy="190" r="104" stroke-width="12" stroke-dasharray="470 654" transform="rotate(135 200 190)"/>
+    <circle class="s dim" cx="200" cy="190" r="80" stroke-width="2" stroke-dasharray="3 9"/>
+    <path class="s" d="M200 190 L262 128" stroke-width="4"/><circle class="f" cx="200" cy="190" r="8"/></svg>`,
+  graph: `<svg viewBox="0 0 400 480" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <path class="s dim" d="M90 90 L200 170 M90 90 L110 250 M200 170 L300 110 M200 170 L200 290 M110 250 L200 290 M300 110 L320 250 M200 290 L320 250" stroke-width="2"/>
+    <rect class="s" x="66" y="70" width="48" height="40" rx="12" stroke-width="3"/>
+    <rect class="s" x="176" y="150" width="48" height="40" rx="12" stroke-width="3"/>
+    <rect class="s dim" x="86" y="230" width="48" height="40" rx="12" stroke-width="3"/>
+    <rect class="s" x="276" y="90" width="48" height="40" rx="12" stroke-width="3"/>
+    <rect class="s dim" x="176" y="270" width="48" height="40" rx="12" stroke-width="3"/>
+    <rect class="s dim" x="296" y="230" width="48" height="40" rx="12" stroke-width="3"/>
+    <circle class="f" cx="90" cy="90" r="6"/><circle class="f" cx="200" cy="170" r="6"/><circle class="f" cx="300" cy="110" r="6"/></svg>`,
+  trace: `<svg viewBox="0 0 400 480" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+    <path class="s dim" d="M0 120H400M0 190H400M0 260H400M0 330H400" stroke-width="1" stroke-dasharray="2 8"/>
+    <path class="s" d="M-10 300 C 40 300 60 250 100 258 S 160 170 205 190 S 270 110 320 130 S 380 70 420 60" stroke-width="4"/>
+    <path class="f" opacity=".14" d="M-10 300 C 40 300 60 250 100 258 S 160 170 205 190 S 270 110 320 130 S 380 70 420 60 V480 H-10Z"/>
+    <circle class="f" cx="320" cy="130" r="7"/></svg>`,
+};
+
+function accordion(items) {
+  return `<div class="acc" role="group" aria-label="What PromptMeter does">${items.map((it, i) => `
+    <div class="acc-item${i === 0 ? ' open' : ''}" role="button" tabindex="0"
+         aria-expanded="${i === 0}" data-go="${esc(it.go)}" data-hue="${esc(String(it.hue))}"
+         aria-label="${esc(it.title)} — ${esc(it.cta)}">
+      <div class="acc-art" aria-hidden="true">${ACC_ART[it.art] || ''}</div>
+      <span class="acc-idx">0${i + 1}</span>
+      <div class="acc-body">
+        <h3 class="acc-title">${esc(it.title)}</h3>
+        <p>${esc(it.text)}</p>
+        <span class="acc-cta">${esc(it.cta)} <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10L10 2M4 2h6v6"/></svg></span>
+      </div>
+    </div>`).join('')}</div>`;
+}
+
+function accOpen(el) {
+  el.parentElement.querySelectorAll('.acc-item').forEach(x => {
+    const on = x === el;
+    x.classList.toggle('open', on);
+    x.setAttribute('aria-expanded', String(on));
+  });
+}
+
+function accGo(target) {
+  if (target === 'focus-prompt') {
+    const box = document.getElementById('p-prompt');
+    if (box) { box.scrollIntoView({ behavior: 'smooth', block: 'center' }); box.focus({ preventScroll: true }); }
+  } else go(target);
+}
+
+// One delegated set of listeners, wired once — .acc is rebuilt on every render().
+document.addEventListener('pointerover', e => {
+  if (e.pointerType !== 'mouse') return;
+  const el = e.target.closest && e.target.closest('.acc-item');
+  if (el && !el.classList.contains('open')) accOpen(el);
+});
+document.addEventListener('focusin', e => {
+  // :focus-visible only — a tap also focuses the card, and that must not
+  // count as the "open" half of a two-tap open-then-follow.
+  const el = e.target.closest && e.target.closest('.acc-item');
+  if (el && !el.classList.contains('open') && el.matches(':focus-visible')) accOpen(el);
+});
+document.addEventListener('click', e => {
+  const el = e.target.closest && e.target.closest('.acc-item');
+  if (!el) return;
+  if (!el.classList.contains('open')) accOpen(el); else accGo(el.dataset.go);
+});
+document.addEventListener('keydown', e => {
+  const el = e.target.closest && e.target.closest('.acc-item');
+  if (!el) return;
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); el.click(); }
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    const sibs = [...el.parentElement.querySelectorAll('.acc-item')];
+    const dir = (e.key === 'ArrowRight' || e.key === 'ArrowDown') ? 1 : -1;
+    const next = sibs[(sibs.indexOf(el) + dir + sibs.length) % sibs.length];
+    // Open explicitly rather than trusting :focus-visible to fire on the focus
+    // change — that heuristic differs by browser and input modality.
+    e.preventDefault(); next.focus({ preventScroll: true }); accOpen(next);
+  }
+});
+
 /* --------------------------------------------------------------- plan */
 
 let planPreview = null;
@@ -572,10 +679,21 @@ async function viewPlan() {
   const pv = await api('/api/providers').catch(() => ({ active: 'heuristic', keys: {} }));
   const sel = (S.models || []).find(m => m.id === S.model);
   return `
-  <div class="page-head">
-    <div><h1>Plan a prompt</h1>
-      <div class="sub">See the cost, the risk, and whether it needs splitting — before you send it.</div></div>
-  </div>
+  <section>
+    <div class="eyebrow">PromptMeter</div>
+    <h1>Know what it costs<br>before you send it.</h1>
+    <p class="lede">Estimate the tokens, the dollars and the odds of hitting a wall — for any model —
+      then split the work into steps you can track. All of it computed on this machine.</p>
+  </section>
+  ${accordion([
+    { title: 'Estimate any prompt', hue: 1, art: 'gauge', go: 'focus-prompt', cta: 'Try a prompt',
+      text: 'Tokens, cost and the chance of being cut off — with a plain-English verdict, for Claude, GPT, Gemini or a local model.' },
+    { title: 'Split it into steps', hue: 2, art: 'graph', go: 'projects', cta: 'See projects',
+      text: 'Big asks become a dependency graph of small steps, each with its own budget, model and a check for when it is done.' },
+    { title: 'Watch it against reality', hue: 3, art: 'trace', go: 'dashboard', cta: 'Open windows',
+      text: 'Real usage is tracked as you work, so plan limits, spend and estimate accuracy come from your history, not guesses.' },
+  ])}
+  <h2 class="section-title" id="p-form">Plan a prompt</h2>
   <div class="grid grid-2">
     <div class="card">
       <div class="field">
@@ -635,10 +753,20 @@ function onModelChange(id) {
   api('/api/settings', { method: 'PATCH', body: { model: id } }).catch(() => {});
   const eff = document.getElementById('p-effort');
   if (eff) { S.effort = eff.value; localStorage.setItem('pm-effort', eff.value); }
-  const prompt = document.getElementById('p-prompt').value;
+  // Picking a model re-renders the whole form (the effort select can flip
+  // enabled/disabled), so carry every field across — not just the prompt.
+  // Losing the turn cap / working folder / splitting mode / planner tick on a
+  // model change was a silent data-loss bug.
+  const ids = ['p-prompt', 'p-cap', 'p-workdir', 'p-force'];
+  const saved = Object.fromEntries(ids.map(i => [i, (document.getElementById(i) || {}).value]));
+  const planner = (document.getElementById('p-planner') || {}).checked;
   render().then(() => {
-    const box = document.getElementById('p-prompt');
-    if (box) box.value = prompt;              // keep what was typed
+    ids.forEach(i => {
+      const el = document.getElementById(i);
+      if (el && saved[i] != null) el.value = saved[i];
+    });
+    const pl = document.getElementById('p-planner');
+    if (pl && planner && !pl.disabled) pl.checked = true;
   });
 }
 
@@ -677,6 +805,9 @@ async function doPreview(forcePlanner) {
     });
     out.innerHTML = renderPreview(planPreview);
     document.getElementById('p-create').disabled = false;
+    // Below 900px the two columns stack and the result lands off-screen under
+    // the form — bring it into view instead of leaving the user staring at "Estimate".
+    if (window.innerWidth <= 900) out.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
     out.innerHTML = `<div class="card"><div class="banner critical">${esc(e.message)}</div></div>`;
   }
@@ -1515,9 +1646,9 @@ async function viewHistory() {
         <td class="num">${isClaudeModel(m.model) ? m.pp5.toFixed(1) + '%' : '—'}</td></tr>`).join('')}</tbody></table>`
       : `<div class="empty">
           <div class="big">Nothing logged yet</div>
-          <div class="small">Run a project and log an iteration, or load sample data to see the shape of this table.</div>
-          <div class="mt12"><button class="btn-primary" onclick="go('plan')">Plan a prompt</button>
-            <button style="margin-left:8px" onclick="seedDemo()">Load sample data</button></div>
+          <div class="small">Run a project and log an iteration. Sample data is deliberately kept out of this
+            table, so it only ever shows your real runs — loading samples won't fill it.</div>
+          <div class="mt12"><button class="btn-primary" onclick="go('plan')">Plan a prompt</button></div>
         </div>`}
   </div>
 
@@ -1990,6 +2121,7 @@ const VIEWS = {
 };
 
 let renderSeq = 0;
+let lastViewKey = null;     // route+id of the previous render, to tell navigation from a refresh
 
 async function render() {
   const host = document.getElementById('view');
@@ -2016,6 +2148,12 @@ async function render() {
     return;
   }
   host.innerHTML = html;
+  // A new screen starts at the top. Without this, "Create project" from the
+  // bottom of the Plan form dropped you onto the project page still scrolled
+  // past its own header. Same-view refreshes (ticking a step, a toast-driven
+  // re-render) keep your place because the key is unchanged.
+  const viewKey = S.route + '/' + (S.id || '');
+  if (viewKey !== lastViewKey) { window.scrollTo(0, 0); lastViewKey = viewKey; }
   if (S.route === 'project' && currentProjTab() === 'graph') drawGraph();
   if (S.route === 'dashboard') armGaugeSweep();
 }

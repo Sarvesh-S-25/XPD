@@ -97,8 +97,13 @@ def _fraction(s: float) -> str:
     return "most"
 
 
+def _nudge(has_cap: bool) -> str:
+    """What to do about a loose run — a cap only helps if there isn't one yet."""
+    return "add a clear finish condition" if has_cap else "set a turn cap"
+
+
 def verdict(pp5_p50: float, pp5_p95: float, remaining_pp5: float | None,
-            risk_band: str = "green") -> dict:
+            risk_band: str = "green", has_cap: bool = False) -> dict:
     """The single line that tells you what to do.
 
     Risk is part of this, not a separate badge. Telling someone to "just send it"
@@ -120,15 +125,17 @@ def verdict(pp5_p50: float, pp5_p95: float, remaining_pp5: float | None,
                 "band": "critical"}
     if risk_band == "red":
         return {"do": "Tighten it before sending.",
-                "why": ("Roughly even odds of being interrupted. A turn cap and a clear "
-                        "finish condition are what move this into the safe zone."),
+                "why": ("Roughly even odds of being interrupted. "
+                        + ("A clear finish condition is" if has_cap else
+                           "A turn cap and a clear finish condition are")
+                        + " what move this into the safe zone."),
                 "band": "serious"}
     if left is not None and worst > left:
         return {"do": "Not enough left in this window.",
                 "why": "Wait for the reset, or split it so the first part fits.",
                 "band": "serious"}
     if risk_band == "amber" or (left is not None and likely <= left < worst):
-        return {"do": "Fine to send, but set a turn cap.",
+        return {"do": f"Fine to send, but {_nudge(has_cap)}.",
                 "why": "The typical run fits; a bad one would not.",
                 "band": "warning"}
     if worst < 0.2:
@@ -140,7 +147,7 @@ def verdict(pp5_p50: float, pp5_p95: float, remaining_pp5: float | None,
             "band": "good"}
 
 
-def verdict_generic(turns_p95: float, risk_band: str = "green") -> dict:
+def verdict_generic(turns_p95: float, risk_band: str = "green", has_cap: bool = False) -> dict:
     """verdict(), for a model with no Claude plan window to compare against.
     Risk band and expected turn count still apply to any agent loop — only
     the "does it fit in what's left of this window" branch doesn't, so it's
@@ -157,11 +164,13 @@ def verdict_generic(turns_p95: float, risk_band: str = "green") -> dict:
                 "band": "critical"}
     if risk_band == "red":
         return {"do": "Tighten it before sending.",
-                "why": ("Roughly even odds of being interrupted. A turn cap and a clear "
-                        "finish condition are what move this into the safe zone."),
+                "why": ("Roughly even odds of being interrupted. "
+                        + ("A clear finish condition is" if has_cap else
+                           "A turn cap and a clear finish condition are")
+                        + " what move this into the safe zone."),
                 "band": "serious"}
     if risk_band == "amber":
-        return {"do": "Fine to send, but set a turn cap.",
+        return {"do": f"Fine to send, but {_nudge(has_cap)}.",
                 "why": "The typical run fits; a bad one would not.",
                 "band": "warning"}
     if turns_p95 < 5:
@@ -173,7 +182,7 @@ def verdict_generic(turns_p95: float, risk_band: str = "green") -> dict:
             "band": "good"}
 
 
-def _risk_context(worst_band: str, risk_band: str) -> str:
+def _risk_context(worst_band: str, risk_band: str, has_cap: bool = False) -> str:
     """Bridges a real, recurring point of confusion: the worst-case *size*
     (session-fraction or turn-count) and the *risk* percentage are computed by
     two different mechanisms — size.py/loop_budget measures how much of a
@@ -187,6 +196,10 @@ def _risk_context(worst_band: str, risk_band: str) -> str:
     silent otherwise so it never adds noise to a run that quietly agrees.
     """
     if worst_band in ("good", "warning") and risk_band in ("red", "critical"):
+        if has_cap:
+            return ("Small and risky at the same time — the size is fine and a turn cap "
+                    "is set, but the wording gives it no clear finish line. A clear "
+                    "finish condition is what actually lowers the risk.")
         return ("Small and risky at the same time — the size is fine, but nothing "
                 "here caps how long it can run. A turn cap and a clear finish "
                 "condition are what actually lower the risk.")
@@ -235,16 +248,17 @@ def explain(est: dict, remaining_pp5: float | None = None) -> dict:
     p50, p95 = est.get("pp5_p50", 0), est.get("pp5_p95", 0)
     b50 = est.get("budget_p50") or {}
     turns_p50, turns_p95 = est.get("turns_p50", 0), est.get("turns_p95", 0)
+    has_cap = not (est.get("features") or {}).get("no_turn_cap", 1)
 
     if vendor == "anthropic":
         sz, worst = size(p50), size(p95)
-        vd = verdict(p50, p95, remaining_pp5, est.get("risk_band", "green"))
+        vd = verdict(p50, p95, remaining_pp5, est.get("risk_band", "green"), has_cap)
         left = window_left(remaining_pp5, None)
     else:
         total_tokens = b50.get("total_tokens")
         sz = size_generic(turns_p50, total_tokens)
         worst = size_generic(turns_p95, (est.get("budget_p95") or {}).get("total_tokens"))
-        vd = verdict_generic(turns_p95, est.get("risk_band", "green"))
+        vd = verdict_generic(turns_p95, est.get("risk_band", "green"), has_cap)
         left = ""
 
     return {
@@ -252,7 +266,7 @@ def explain(est: dict, remaining_pp5: float | None = None) -> dict:
         "worst": worst,
         "verdict": vd,
         "risk": risk_sentence(est.get("risk", 0), est.get("risk_band", "green")),
-        "risk_context": _risk_context(worst["band"], est.get("risk_band", "green")),
+        "risk_context": _risk_context(worst["band"], est.get("risk_band", "green"), has_cap),
         "cost": money(est.get("cost_p50")),
         "cost_worst": money(est.get("cost_p95")),
         "turns": (f"About {turns_p50:.0f} back-and-forth steps, "

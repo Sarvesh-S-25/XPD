@@ -100,3 +100,39 @@ class VerdictGenericTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CapAwareWordingTest(unittest.TestCase):
+    """A verdict must not tell the user to do what they already did."""
+
+    def test_amber_verdict_asks_for_a_cap_only_when_there_is_none(self):
+        no_cap = plain.verdict_generic(20, "amber", has_cap=False)
+        capped = plain.verdict_generic(20, "amber", has_cap=True)
+        self.assertIn("turn cap", no_cap["do"])
+        self.assertNotIn("turn cap", capped["do"])
+        self.assertIn("finish condition", capped["do"])
+
+    def test_claude_amber_verdict_is_cap_aware_too(self):
+        self.assertIn("turn cap", plain.verdict(5, 10, 80, "amber", has_cap=False)["do"])
+        self.assertNotIn("turn cap", plain.verdict(5, 10, 80, "amber", has_cap=True)["do"])
+
+    def test_red_verdict_stops_recommending_a_cap_once_set(self):
+        self.assertIn("turn cap", plain.verdict_generic(20, "red")["why"])
+        self.assertNotIn("turn cap", plain.verdict_generic(20, "red", has_cap=True)["why"])
+
+    def test_small_and_risky_note_does_not_claim_nothing_caps_the_run(self):
+        note = plain._risk_context("good", "red", has_cap=True)
+        self.assertTrue(note)
+        self.assertNotIn("nothing here caps", note)
+        self.assertIn("nothing here caps", plain._risk_context("good", "red", has_cap=False))
+
+    def test_default_is_unchanged_for_existing_callers(self):
+        self.assertEqual(plain.verdict_generic(20, "amber"), plain.verdict_generic(20, "amber", has_cap=False))
+
+    def test_explain_reads_the_cap_from_the_estimate_features(self):
+        base = {"spec": {"vendor": "openai"}, "risk_band": "amber", "turns_p50": 10, "turns_p95": 20,
+                "budget_p50": {}, "budget_p95": {}}
+        loose = plain.explain({**base, "features": {"no_turn_cap": 1}})
+        capped = plain.explain({**base, "features": {"no_turn_cap": 0}})
+        self.assertIn("turn cap", loose["verdict"]["do"])
+        self.assertNotIn("turn cap", capped["verdict"]["do"])

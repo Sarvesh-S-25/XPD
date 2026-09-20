@@ -629,3 +629,178 @@ details[open] summary { margin-bottom: 8px; }
   font-family: var(--mono);
   display: grid; place-items: center; font-size: 13px; font-weight: 600;
 }
+
+/* ==================================================================
+   Cinematic pass (September 2026, part 5) — explicit user direction:
+   rebuild the frontend after the USAvionix features-accordion reference
+   (details.so/inspo/usavionix-6b1ed0). What that reference is made of, and
+   what it maps to here:
+     · a pure-black canvas          → --page: #000 in the dark theme
+     · big, tight grotesk headlines → --display + h1/.hero sizing
+     · a slim top bar, pill buttons → .sidebar re-laid-out horizontally
+     · rounded tall cards where hover grows one (flex-grow) and the rest
+       compress, captions clipped + faded on the compressed ones → .acc
+   No photographs, web fonts or libraries: the app is zero-install, so the
+   card art is inline SVG drawn from the same tokens as everything else.
+   Data/status colours are untouched — only chrome changed. ================================================================== */
+
+:root {
+  --display: "Inter Tight", "Inter", "Segoe UI Variable Display", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font: "Inter", "Segoe UI Variable Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --cta-bg: var(--accent);
+  --cta-ink: var(--accent-ink);
+  --r: 20px;
+  --r-sm: 12px;
+  --ease: cubic-bezier(.2, .8, .2, 1);
+
+  /* Decorative only (like --blob-1/2): the third accordion hue. Deliberately
+     NOT --series-4 — that is a categorical *data* colour (ARCHITECTURE.md §6)
+     and must never double as decoration. */
+  --blob-3: #c98a2b;
+
+  /* The accordion's "media" surfaces. Like a photograph, they stay dark in
+     both themes, so their ink is fixed rather than following --text-primary. */
+  --media-bg: #050505;
+  --media-ink: #ffffff;
+  --media-ink-2: rgba(255, 255, 255, .78);
+  --media-ink-3: rgba(255, 255, 255, .55);
+  --media-chip: rgba(255, 255, 255, .14);
+  --media-scrim-hi: rgba(0, 0, 0, .9);
+  --media-scrim-mid: rgba(0, 0, 0, .45);
+}
+
+:root[data-theme="dark"] {
+  --page: #000;
+  --surface-1: #0a0a0b;
+  --text-primary: #f4f4f5;
+  --text-secondary: #b4b4ba;
+  --text-muted: #7f7f87;
+  --grid: #1b1b1f;
+  --baseline: #34343a;
+  --border: rgba(255, 255, 255, .12);
+  --raise: rgba(255, 255, 255, .06);
+  --glass: rgba(255, 255, 255, .035);
+  --glass-border: rgba(255, 255, 255, .11);
+  --track: #1a1a1f;
+  --track-warm: #202026;
+  --cta-bg: #f4f4f5;
+  --cta-ink: #000;
+}
+/* The reference has no ambient colour at all — black is the point. */
+:root[data-theme="dark"] body::before { display: none; }
+
+/* ------------------------------------------------------------ type */
+h1, h2, h3 { font-family: var(--display); }
+h1 { font-size: clamp(30px, 4.2vw, 48px); font-weight: 700; letter-spacing: -0.035em; line-height: 1.04; }
+h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.02em; }
+.hero { font-family: var(--display); font-size: clamp(28px, 3.4vw, 40px); font-weight: 700; letter-spacing: -0.035em; }
+.page-head { margin-bottom: 28px; }
+.page-head .sub { font-size: 14.5px; margin-top: 10px; max-width: 62ch; }
+.eyebrow { font-family: var(--mono); font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--text-muted); margin-bottom: 14px; }
+.lede { color: var(--text-secondary); font-size: 16px; max-width: 58ch; margin: 14px 0 0; }
+.section-title { font-family: var(--display); font-size: 22px; font-weight: 650; letter-spacing: -0.025em;
+  margin: 48px 0 16px; }
+
+/* ------------------------------------------------------------ top bar */
+.app { flex-direction: column; }
+.sidebar {
+  width: auto; flex: none; height: auto; position: sticky; top: 0; z-index: 20;
+  flex-direction: row; align-items: center; gap: 6px;
+  padding: 14px 28px; border-right: 0; border-top: 0;
+  border-bottom: 1px solid var(--glass-border);
+  background: color-mix(in srgb, var(--page) 78%, transparent);
+  overflow-x: auto; scrollbar-width: none;
+}
+.sidebar::-webkit-scrollbar { display: none; }
+.brand { padding: 0; margin-right: auto; flex: 0 0 auto; }
+.brand > div > div { font-family: var(--display); font-size: 19px; font-weight: 700; letter-spacing: -0.03em; }
+.brand-mark { border-radius: 50%; }
+.nav-item {
+  width: auto; flex: 0 0 auto; white-space: nowrap;
+  border-left: 0; border-radius: 999px; padding: 7px 14px; font-size: 13.5px;
+}
+.nav-item.active { border-left: 0; box-shadow: none;
+  background: color-mix(in srgb, var(--text-primary) 14%, transparent); }
+.nav-item svg { display: none; }
+.nav-spacer { display: none; }
+#theme-toggle { margin: 0 0 0 8px !important; border: 1px solid var(--border); }
+
+.main { max-width: 1240px; width: 100%; margin: 0 auto; padding: 44px 40px 96px; }
+
+/* ------------------------------------------------------------ controls */
+button, .btn { border-radius: 999px; padding: 8px 16px; }
+.btn-sm { border-radius: 999px; padding: 5px 12px; }
+.btn-primary { background: var(--cta-bg); border-color: var(--cta-bg); color: var(--cta-ink); font-weight: 600; }
+.btn-primary:hover { background: var(--cta-bg); filter: brightness(.92);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--cta-bg) 18%, transparent); }
+input, textarea, select { border-radius: 14px; padding: 10px 14px; }
+.tab { border-radius: 999px; border-bottom: 0; margin-bottom: 0; padding: 7px 14px; }
+.tab.active { background: color-mix(in srgb, var(--text-primary) 14%, transparent); border-bottom: 0; }
+.tabs { border-bottom: 0; gap: 6px; }
+.banner { border-radius: 14px; }
+
+/* ------------------------------------------------------------ accordion */
+.acc { display: flex; gap: 16px; height: clamp(320px, 50vh, 470px); margin-top: 36px; }
+.acc-item {
+  --hue: var(--accent);
+  position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; isolation: isolate;
+  border-radius: 26px; border: 1px solid var(--glass-border); cursor: pointer;
+  background: var(--media-bg);
+  transition: flex-grow .65s var(--ease), border-color .3s ease;
+}
+.acc-item[data-hue="2"] { --hue: var(--blob-2); }
+.acc-item[data-hue="3"] { --hue: var(--blob-3); }
+.acc-item.open { flex-grow: 2.4; border-color: color-mix(in srgb, var(--hue) 45%, var(--glass-border)); }
+.acc-item:focus-visible { outline: 2px solid var(--hue); outline-offset: 3px; }
+.acc-art { position: absolute; inset: 0; z-index: -2;
+  background:
+    radial-gradient(90% 70% at 30% 12%, color-mix(in srgb, var(--hue) 34%, transparent), transparent 70%),
+    radial-gradient(70% 60% at 85% 90%, color-mix(in srgb, var(--hue) 16%, transparent), transparent 70%),
+    var(--media-bg); }
+/* Art keeps one size (meet) in the upper part of the card whether it is open or
+   squeezed; the caption owns the lower part. */
+.acc-art svg { position: absolute; top: 0; left: 0; width: 100%; height: 74%; display: block;
+  -webkit-mask-image: linear-gradient(currentColor 68%, transparent);
+  mask-image: linear-gradient(currentColor 68%, transparent); }
+.acc-art .s  { fill: none; stroke: var(--hue); stroke-linecap: round; stroke-linejoin: round; }
+.acc-art .f  { fill: var(--hue); }
+.acc-art .dim { opacity: .35; }
+.acc-item::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background: linear-gradient(to top, var(--media-scrim-hi) 0, var(--media-scrim-mid) 42%, transparent 74%); }
+.acc-idx { position: absolute; top: 22px; left: 26px; font-family: var(--mono); font-size: 12px;
+  letter-spacing: .12em; color: var(--media-ink-3); }
+/* The caption is always laid out at the *open* width and simply clipped by
+   the card when it is compressed — which is exactly how the reference reads:
+   a squeezed card shows the start of its title and a cut-off sentence. */
+.acc-body { position: absolute; left: 30px; bottom: 28px; width: min(440px, 70vw); color: var(--media-ink);
+  opacity: .38; transition: opacity .45s ease; }
+.acc-item.open .acc-body { opacity: 1; }
+.acc-title { font-family: var(--display); font-size: 25px; font-weight: 500; letter-spacing: -0.02em; margin: 0 0 8px; color: var(--media-ink); }
+.acc-body p { margin: 0; font-size: 14.5px; line-height: 1.5; color: var(--media-ink-2); }
+.acc-cta { display: inline-flex; align-items: center; gap: 6px; margin-top: 16px; padding: 7px 14px;
+  border-radius: 999px; background: var(--media-chip); font-size: 13px; font-weight: 500;
+  opacity: 0; transform: translateY(6px); transition: opacity .35s ease .15s, transform .35s var(--ease) .15s; }
+.acc-item.open .acc-cta { opacity: 1; transform: none; }
+
+@media (max-width: 820px) {
+  /* Every destination stays visible: the bar wraps to two rows and stops being
+     sticky, rather than hiding most of the nav behind an invisible scroll. */
+  .sidebar { padding: 12px 16px; flex-wrap: wrap; overflow: visible; position: static; gap: 6px; }
+  .brand { flex: 1 0 100%; margin-bottom: 4px; }
+  .nav-item { padding: 6px 12px; }
+  #theme-toggle { margin-left: 0 !important; }
+  .main { padding: 28px 18px 72px; }
+  .acc { flex-direction: column; height: auto; gap: 12px; }
+  .acc-item { flex: none; height: 104px; transition: height .55s var(--ease), border-color .3s ease; }
+  .acc-item.open { height: 320px; }
+  .acc-body { width: calc(100% - 60px); }
+}
+
+/* Bug fix: `.card + .card { margin-top }` (stacked cards) also matched cards that
+   are siblings *inside a grid*, nudging every second cell down 14px so paired
+   stat cards sat misaligned. Grid gap already handles spacing there. */
+.grid > .card + .card, .grid > .proj + .proj { margin-top: 0; }
+
+input[type="checkbox"] { accent-color: var(--accent); }
+.step-head input[type="checkbox"] { margin: 4px 2px 0 0; flex: 0 0 auto; }

@@ -1402,6 +1402,74 @@ regression tests for the two backend bugs.
   part 3 pivot made for the persistent selection bar. README's nine-step
   walkthrough updated to match (step 2).
 
+### Cinematic frontend pass (September 2026, part 5) — explicit user direction
+
+Direction: rebuild the frontend after a reference video and inspiration page
+(USAvionix's features accordion on details.so) — pure black, big tight
+headlines, a slim top bar with pill controls, and a row of tall cards where
+hovering one grows it while the rest compress. Bug-hunted in a real Chrome
+session (Claude in Chrome) rather than trusting the diff; Gemini was not
+consulted (its CLI is not installed here — a setup problem, noted, not worked
+around). Zero-install rule kept: no images, web fonts or libraries.
+
+- **Look.** Dark is now the default theme, set in `index.html` before first
+  paint (an explicit saved choice still wins; light still works). The
+  sidebar became a top bar (wraps to two rows on phones so every destination
+  stays visible). Buttons and tabs are pills, radii grew, headings use a
+  tight display stack. The ambient drifting backdrop is off in dark — the
+  reference has no ambient colour, black is the point. Colours stay tokens:
+  new decorative `--blob-3` and `--media-*` tokens instead of literals in the
+  accordion, and deliberately **not** `--series-4` (a categorical data colour
+  must never double as decoration — this was caught in review against the
+  `frontend-design` skill, not in the first draft).
+- **The accordion** (`accordion()` in `app.js`, `.acc*` in `styles.css`) on
+  the Plan screen: hover (mouse), keyboard focus/arrow keys, or a first tap
+  (touch) opens a card; activating the open card follows its link. Captions
+  are laid out at the open width and simply clipped when squeezed, which is
+  how the reference reads. Art is inline SVG in the card's `--hue`. Arrow
+  keys open the target explicitly instead of trusting `:focus-visible`,
+  which differs by browser and input modality.
+- **Bugs found while doing it, all fixed:**
+  - *Stale CSRF token after a restart — HIGH.* The token is per server
+    process, so restarting PromptMeter with a tab open made every action fail
+    with "Missing or wrong CSRF token" until a manual reload. `api()` now
+    fetches the new token and retries once; a dead server reports "Can't reach
+    PromptMeter — is it still running?" instead of "Failed to fetch".
+  - *Malformed input 500'd or dropped the connection — MED.* A non-dict JSON
+    body reached routes that call `.get()`; a non-numeric `turn_cap`/token
+    count was a bare `int()`; a garbage `Content-Length` killed the request.
+    All are now clear 400s (`_parse_cap`, `_whole`, body coercion).
+  - *Verdict told you to do what you had already done — MED.* "Fine to send,
+    but set a turn cap" appeared with a cap set, and the small-and-risky note
+    claimed "nothing here caps how long it can run". `plain.py` is now
+    cap-aware (`has_cap`).
+  - *Changing the model wiped the form — MED.* Only the prompt text survived
+    the re-render; turn cap, working folder, splitting mode and the planner
+    tick were silently lost.
+  - *Navigation kept the old scroll offset — LOW.* "Create project" from the
+    bottom of the Plan form landed on the project page scrolled past its own
+    header. A new route/id now resets to the top; in-place refreshes (ticking
+    a step) keep your place.
+  - *Paired grid cards were misaligned — LOW.* `.card + .card { margin-top }`
+    also matched siblings inside a grid.
+  - *History's empty state gave impossible advice — LOW.* It said to load
+    sample data to fill a table that deliberately excludes sample data.
+  - *Results stacked off-screen on narrow layouts — LOW.* The estimate now
+    scrolls into view below 900px.
+- **Tests: 99 → 158.** `tests/test_server.py` drives a real server on an
+  ephemeral port (guards, static serving, settings, preview validation,
+  project lifecycle); `tests/test_frontend.py` statically checks that every
+  inline handler names a defined function, every nav item has a view, the
+  accordion is styled and escaped, colour literals stay out of it, and (when
+  `node` is present) `app.js` parses; `tests/test_plain.py` gained cap-aware
+  wording. The malformed-input tests were confirmed to fail against the
+  previous `server.py`.
+- **Still open / not verifiable here.** Real keyboard Tab/Arrow input could
+  not be driven through the Chrome tool (it delivered no key events to the
+  page), so keyboard behaviour was verified by dispatching `KeyboardEvent`s at
+  the handler, not by physical keys. The other four screens were restyled by
+  the shared tokens rather than redesigned card by card.
+
 ### Still open, ranked
 
 **P3 — step status is still manual, one-click-closer.** Turns attribute

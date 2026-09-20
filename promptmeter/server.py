@@ -124,17 +124,44 @@ def api_meter_history(_m, q, _b):
 
 # ================================================================ planning
 
+def _whole(body: dict, key: str, default: int = 0) -> int:
+    """A whole-number field from a request body; a clear 400 instead of a 500
+    when a form sends something that isn't one."""
+    v = body.get(key)
+    if v in (None, ""):
+        return default
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        raise Err(400, f"{key} must be a whole number.")
+
+
+def _parse_cap(v):
+    """A turn cap from the request body: blank/0/None means "no cap"; anything
+    else must be a whole number >= 1. Used to be a bare int() in two places, so
+    a stray "abc" or "1.5" was a 500 instead of a clear 400."""
+    if v in (None, "", 0, "0"):
+        return None
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        raise Err(400, "Turn cap must be a whole number.")
+    if n < 1:
+        raise Err(400, "Turn cap must be at least 1.")
+    return n
+
+
 @route("POST", "/api/preview")
 def api_preview(_m, _q, body):
     prompt = (body.get("prompt") or "").strip()
     if not prompt:
         raise Err(400, "Prompt is empty.")
-    cap = body.get("turn_cap")
+    cap = _parse_cap(body.get("turn_cap"))
     return planner.preview(
         prompt,
         model=body.get("model") or "claude-sonnet-5",
         workdir=body.get("workdir") or "",
-        turn_cap=int(cap) if cap else None,
+        turn_cap=cap,
         force=body.get("force") or "auto",
         use_planner=bool(body.get("use_planner")),
         effort=body.get("effort") or pricing.DEFAULT_EFFORT,
@@ -264,7 +291,7 @@ def api_create(_m, _q, body):
         workdir=body.get("workdir") or "",
         force=body.get("force") or "auto",
         goal=body.get("goal") or "",
-        turn_cap=int(body["turn_cap"]) if body.get("turn_cap") else None,
+        turn_cap=_parse_cap(body.get("turn_cap")),
     )
     return api_project({"id": str(pid)}, {}, None)
 
@@ -361,10 +388,10 @@ def api_iterate(m, _q, body):
     n = (db.scalar("SELECT MAX(n) FROM iterations WHERE step_id=?", (sid,), 0) or 0) + 1
 
     model = body.get("model") or s["model"]
-    in_tok = int(body.get("in_tokens") or 0)
-    out_tok = int(body.get("out_tokens") or 0)
-    c_read = int(body.get("cache_read") or 0)
-    c_write = int(body.get("cache_write") or 0)
+    in_tok = _whole(body, "in_tokens")
+    out_tok = _whole(body, "out_tokens")
+    c_read = _whole(body, "cache_read")
+    c_write = _whole(body, "cache_write")
     cost = float(body.get("cost_usd") or 0) or pricing.cost_usd(model, in_tok, out_tok, c_read, c_write)
     a5, a7 = meter.alphas()
 
@@ -447,7 +474,7 @@ def check_step(sid: int) -> dict:
 @route("POST", "/api/steps/{id}/satisfy")
 def api_satisfy(m, _q, body):
     sid = int(m["id"])
-    val = int(body.get("satisfied", 1))
+    val = _whole(body, "satisfied", default=1)
     db.run("UPDATE steps SET satisfied=?, satisfied_note=?, status=?, ended_at=? WHERE id=?",
            (val, body.get("note") or "Marked by hand",
             "done" if val == 1 else "failed", db.now(), sid))
@@ -692,12 +719,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._static(path)
 
         body = None
-        length = int(self.headers.get("Content-Length") or 0)
+        try:
+            length = max(0, int(self.headers.get("Content-Length") or 0))
+        except ValueError:
+            return self._json(400, {"error": "Bad Content-Length header."})
         if length:
             raw = self.rfile.read(length)
             try:
                 body = json.loads(raw.decode("utf-8"))
             except Exception:
+                body = {}
+            # Every route reads its body with .get(); a JSON list/number/null
+            # used to reach them as-is and 500 with an AttributeError.
+            if not isinstance(body, dict):
                 body = {}
 
         if method in MUTATING and self.headers.get(CSRF_HEADER) != CSRF_TOKEN:
