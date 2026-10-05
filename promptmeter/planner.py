@@ -42,7 +42,7 @@ def route_model(item_prompt: str, default_model: str) -> str:
     return sibling(default_model, TIER_ORDER[idx - 1])
 
 
-def preview(prompt: str, *, model: str = "claude-sonnet-5", workdir: str = "",
+def preview(prompt: str, *, model: str | None = None, workdir: str = "",
             turn_cap: int | None = None, force: str = "auto",
             use_planner: bool = False, effort: str = pricing.DEFAULT_EFFORT) -> dict:
     """Full plan preview — what the Composer screen renders before you commit.
@@ -51,6 +51,7 @@ def preview(prompt: str, *, model: str = "claude-sonnet-5", workdir: str = "",
     derived from that list instead of from keywords. The model never sees a
     price: it enumerates, we cost it.
     """
+    model = model or pricing.default_model()
     rem5, rem7 = meter.remaining()
 
     drafted, scope_override = None, None
@@ -139,7 +140,11 @@ def preview(prompt: str, *, model: str = "claude-sonnet-5", workdir: str = "",
         "steps": steps,
         "stages": n_stages,
         "savings": sav,
-        "schedule": schedule(steps, rem5, rem7),
+        # Packing steps into 5-hour plan windows is a Claude-subscription idea;
+        # for any other model there are no windows to pack into.
+        "schedule": schedule(steps, rem5, rem7) if est["plan_metered"] else {
+            "windows": [], "weekly_remaining_after": rem7, "blocked": [],
+            "spans_windows": False, "hours_to_finish": 0.0},
         "windows": {"remaining_pp5": rem5, "remaining_pp7": rem7},
     }
 

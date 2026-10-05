@@ -167,7 +167,7 @@ MULTI_SYSTEM = re.compile(
 
 
 def risk_features(prompt: str, *, tools_write: bool = True, tools_bash: bool = True,
-                  turn_cap: int | None = None, model: str = "claude-sonnet-5",
+                  turn_cap: int | None = None, model: str | None = None,
                   files_in_scope: int = 0) -> dict:
     words = max(1, len(prompt.split()))
     return {
@@ -251,7 +251,11 @@ def risk_score(feats: dict, headroom_ratio: float = 1.0,
 
 # ---------------------------------------------------------------- estimate
 
-def estimate(prompt: str, *, model: str = "claude-sonnet-5", task_class: str | None = None,
+# headroom_ratio that risk_score() treats as neutral (neither > 1.0 pressure nor
+# < 0.5 comfort). Used for models with no plan window to measure headroom against.
+NO_WINDOW_HEADROOM = 0.5
+
+def estimate(prompt: str, *, model: str | None = None, task_class: str | None = None,
              turn_cap: int | None = None, tools_write: bool = True, tools_bash: bool = True,
              base_context: int = 12000, remaining_pp5: float = 100.0,
              remaining_pp7: float = 100.0, turn_scale: float = 1.0,
@@ -265,6 +269,7 @@ def estimate(prompt: str, *, model: str = "claude-sonnet-5", task_class: str | N
     """
     from . import meter
 
+    model = model or pricing.default_model()
     cdetail = None if task_class else classify_detail(prompt)
     tc = task_class or cdetail["task_class"]
     prof = learning.profile(tc, model)          # priors blended with observed history
@@ -302,9 +307,19 @@ def estimate(prompt: str, *, model: str = "claude-sonnet-5", task_class: str | N
     pp5_50, pp5_95 = c50 * alpha5, c95 * alpha5
     pp7_50, pp7_95 = c50 * alpha7, c95 * alpha7
 
-    head5 = pp5_95 / max(remaining_pp5, 0.5)
-    head7 = pp7_95 / max(remaining_pp7, 0.5)
-    headroom = max(head5, head7)
+    # A 5-hour / weekly plan window exists only for a Claude subscription. For
+    # any other model there is no window to run out of, so its headroom must not
+    # be judged against the user's *Claude* usage — that used to make a Gemini or
+    # GPT prompt "risky" because a Claude window happened to be nearly full.
+    # NO_WINDOW_HEADROOM sits exactly on risk_score's neutral band: no budget
+    # pressure and no "plenty of room" bonus either.
+    plan_metered = pricing.spec(model).get("vendor") == "anthropic"
+    if plan_metered:
+        head5 = pp5_95 / max(remaining_pp5, 0.5)
+        head7 = pp7_95 / max(remaining_pp7, 0.5)
+        headroom = max(head5, head7)
+    else:
+        headroom = NO_WINDOW_HEADROOM
 
     feats = risk_features(prompt, tools_write=tools_write, tools_bash=tools_bash,
                           turn_cap=turn_cap, model=model)
@@ -327,6 +342,7 @@ def estimate(prompt: str, *, model: str = "claude-sonnet-5", task_class: str | N
         "effort": effort,
         "spec": {k: pricing.spec(model)[k] for k in
                  ("vendor", "label", "context", "max_output", "thinking")},
+        "plan_metered": plan_metered,
         "headroom_ratio": round(headroom, 3),
         "remaining_pp5": round(remaining_pp5, 1),
         "remaining_pp7": round(remaining_pp7, 1),
@@ -342,7 +358,7 @@ def should_split(est: dict) -> tuple[bool, str]:
     """The 'split only if it helps' rule. Returns (split, human reason)."""
     if est["risk_band"] in ("red", "critical"):
         return True, f"Risk is {est['risk_band']} ({est['risk']*100:.0f}% chance of hitting a wall)."
-    if est["pp5_p95"] > est["remaining_pp5"]:
+    if est.get("plan_metered", True) and est["pp5_p95"] > est["remaining_pp5"]:
         return True, (f"Worst case needs {est['pp5_p95']:.0f}% of the 5-hour window "
                       f"but only {est['remaining_pp5']:.0f}% is left.")
     if est["turns_p95"] > 45:

@@ -177,8 +177,58 @@ def _load(name: str, fallback: dict) -> dict:
     return dict(fallback)
 
 
+def _slug(text: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "-", str(text or "").lower()).strip("-")
+
+
+def build_custom(model_id: str, raw: dict) -> dict:
+    """A full catalogue entry from the few fields a person actually knows.
+
+    Each custom model keeps its own vendor id (from the vendor name given, or
+    its own id) and a tier that never matches the routing ladder, so a step is
+    never silently moved onto a *different* provider's model — the original
+    routing bug (ARCHITECTURE.md section 12).
+    """
+    def num(k, default, lo=0.0):
+        try:
+            v = float(raw.get(k, default))
+        except (TypeError, ValueError):
+            raise ValueError(f"{k} must be a number.")
+        if v < lo or v != v or v == float("inf"):
+            raise ValueError(f"{k} must be {'at least ' + str(lo) if lo else 'zero or more'}.")
+        return v
+
+    label = str(raw.get("label") or model_id).strip()[:60]
+    vendor_name = str(raw.get("vendor") or label).strip()[:40]
+    vendor = "custom-" + (_slug(vendor_name) or _slug(model_id) or "model")
+    p_in, p_out = num("in", 0.0), num("out", 0.0)
+    return {
+        "vendor": vendor, "vendor_label": vendor_name, "label": label, "tier": "custom",
+        "custom": True,
+        "in": p_in, "out": p_out,
+        "cache_read": num("cache_read", 0.1), "cache_write_1h": 1.0, "cache_write_5m": 1.0,
+        "context": int(num("context", 128000, 1024)),
+        "max_output": int(num("max_output", 8000, 1)),
+        "thinking": bool(raw.get("thinking", False)),
+        "thinking_share": _TH_OFF,
+    }
+
+
+def custom_models() -> dict:
+    out = {}
+    for mid, raw in (db.get_setting("custom_models") or {}).items():
+        try:
+            out[mid] = build_custom(mid, raw)
+        except (ValueError, AttributeError):
+            continue                       # a hand-edited bad row never breaks the catalogue
+    return out
+
+
 def models() -> dict:
-    return _load("models.json", DEFAULT_MODELS)
+    merged = dict(_load("models.json", DEFAULT_MODELS))
+    merged.update(custom_models())         # a custom id may deliberately override a built-in price
+    return merged
 
 
 def prices() -> dict:
@@ -198,8 +248,15 @@ def plan(pid: str) -> dict:
     return plans().get(pid) or plans()["pro"]
 
 
+# An unrecognised model is not "some Claude". It used to inherit Claude
+# Sonnet's price *and* the "anthropic" vendor, so any agent outside the
+# catalogue (Mistral, DeepSeek, Grok, a self-hosted model...) was silently
+# costed as Claude and shown Claude plan-window percentages. It now gets a
+# neutral mid-range price under the vendor "other", which every vendor-branching
+# path (plain.py, the UI) treats as "not a Claude plan" — and is_known() lets
+# callers say so out loud. Add the real price under Setup -> Your own models.
 FALLBACK = {
-    "vendor": "anthropic", "label": "unknown", "tier": "sonnet",
+    "vendor": "other", "label": "unknown", "tier": "custom",
     "in": 2.0, "out": 10.0, "cache_read": 0.1, "cache_write_1h": 2.0,
     "cache_write_5m": 1.25, "context": 200000, "max_output": 32000,
     "thinking": False, "thinking_share": _TH_OFF,
@@ -207,8 +264,13 @@ FALLBACK = {
 
 
 def price_of(model: str) -> dict:
-    m = models()
-    return m.get(model) or m.get("claude-sonnet-5") or dict(FALLBACK)
+    return models().get(model) or dict(FALLBACK)
+
+
+def is_known(model: str) -> bool:
+    """True when the model is in the catalogue (built-in or user-added), i.e.
+    its price is a real one rather than the neutral fallback."""
+    return bool(model) and model in models()
 
 
 def spec(model: str) -> dict:
@@ -229,7 +291,44 @@ def by_vendor() -> list[dict]:
         items = sorted(groups.get(vid, []), key=lambda x: x.get("in", 0))
         if items:
             out.append({"id": vid, "label": info["label"], "models": items})
+    # Vendors added by the user (custom models) — listed after the built-in ones.
+    for vid in sorted(v for v in groups if v not in VENDORS):
+        items = sorted(groups[vid], key=lambda x: x.get("in", 0))
+        out.append({"id": vid, "label": items[0].get("vendor_label") or vid, "models": items})
     return out
+
+
+def default_model() -> str:
+    """The model a new prompt starts on — chosen, never hard-coded to one vendor.
+
+    In order: what you last picked; the model you actually use most (from
+    tracked turns and logged iterations); a model from the vendor of the
+    provider you connected; finally the first catalogue entry, which is only
+    reached on an install with no signal at all.
+    """
+    cat = models()
+    saved = db.get_setting("default_model")
+    if saved in cat:
+        return saved
+    try:
+        row = db.row(
+            """SELECT model, SUM(n) AS n FROM (
+                   SELECT model, COUNT(*) AS n FROM turns GROUP BY model
+                   UNION ALL
+                   SELECT model, COUNT(*) AS n FROM iterations GROUP BY model
+               ) WHERE model IN (%s) GROUP BY model ORDER BY n DESC LIMIT 1"""
+            % ",".join("?" * len(cat)), tuple(cat))
+    except Exception:                                   # noqa: BLE001 turns table absent
+        row = None
+    if row and row.get("model") in cat:
+        return row["model"]
+    vendor = {"anthropic": "anthropic", "openai": "openai", "gemini": "google"}.get(
+        (db.get_setting("provider_config") or {}).get("active"))
+    if vendor:
+        same = [(k, v) for k, v in cat.items() if v.get("vendor") == vendor]
+        if same:
+            return sorted(same, key=lambda kv: kv[1].get("in", 0))[len(same) // 2][0]
+    return next(iter(cat))
 
 
 def rates(model: str, context_tokens: int = 0) -> tuple[float, float]:

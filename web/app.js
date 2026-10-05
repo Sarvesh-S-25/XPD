@@ -1,7 +1,7 @@
 /* PromptMeter UI — vanilla JS, no build step. */
 
 const S = { route: 'plan', id: null, status: null, models: [], vendors: [],
-            efforts: ['none','low','medium','high','max'], model: 'claude-sonnet-5',
+            efforts: ['none','low','medium','high','max'], model: '',
             effort: 'medium', surface: 'terminal', plans: [], oracles: [], cache: {},
             csrfToken: null };
 
@@ -282,41 +282,122 @@ async function setWindowsProvider(v) {
 // what the person is using PromptMeter for was a real complaint. A fresh
 // install (wp === '') asks once; wp === 'other' explains why there's
 // nothing to track instead of showing Claude numbers anyway.
-function renderWindowsGate(s, wp) {
-  if (wp === 'other') {
-    return `
-    <div class="page-head">
-      <div><h1>Windows</h1><div class="sub">Automatic window tracking is Claude-plan specific.</div></div>
-      <button class="btn-sm" onclick="go('plan')">Plan a prompt</button>
-    </div>
-    <div class="card">
-      <div class="label">Not tracked here</div>
-      <div class="hero">No plan window to measure</div>
-      <p class="small muted mt8" style="max-width:60ch">This page tracks the 5-hour and weekly limits on
-        a Claude Pro or Max plan, read from Claude Code's local sessions. There's no equivalent limit
-        for GPT, Gemini or a local model to show instead — Plan a prompt and Projects work the same with
-        any of them, just without a percent-of-window figure.</p>
-      <div class="row mt12">
-        <button class="btn-sm btn-primary" onclick="go('setup')">Connect a provider</button>
-        <button class="btn-sm" onclick="setWindowsProvider('claude')">Actually, I'm on a Claude plan</button>
+// What every agent has actually cost, by model — the part of this screen that
+// means something whichever assistant you use. Sources: Claude Code sessions
+// tailed automatically, plus anything an agent reported (POST /api/usage or
+// `python -m promptmeter --log-usage`).
+function usageByModelCard(u) {
+  const rows = (u && u.models) || [];
+  return `<div class="card mt16">
+    <div class="card-head"><h2>Usage by model</h2>
+      <span class="hint">every agent — tracked sessions and reported turns</span></div>
+    ${rows.length ? `<table>
+      <thead><tr><th>Model</th><th>From</th><th class="num">Turns</th><th class="num">Input</th>
+        <th class="num">Output</th><th class="num">Cost</th></tr></thead>
+      <tbody>${rows.map(m => `<tr>
+        <td>${esc(m.label)}${m.known ? '' : ' <span class="chip">unpriced</span>'}
+          <div class="small muted mono">${esc(m.model)}</div></td>
+        <td class="small muted">${m.sources.map(x => x === 'transcript' ? 'Claude Code' : 'reported').join(' + ')}</td>
+        <td class="num">${num(m.turns)}</td><td class="num">${tokens(m.in_tokens + m.cache_read)}</td>
+        <td class="num">${tokens(m.out_tokens)}</td><td class="num">${usd(m.cost)}</td></tr>`).join('')}</tbody></table>
+      ${rows.some(m => !m.known) ? `<div class="small muted mt8">“Unpriced” models are costed with a neutral
+        fallback. Add their real price under Setup → Your own models.</div>` : ''}`
+    : `<div class="empty"><div class="big">No usage yet</div>
+        <div class="small">Any agent can report what it spends — Codex, Gemini CLI, Cursor, Aider, a script.
+          Claude Code sessions are picked up on their own.</div>
+        <div class="mt12"><button class="btn-primary" onclick="go('setup')">Connect an agent</button></div></div>`}
+  </div>`;
+}
+
+// Codex (ChatGPT plan) and Gemini plans meter usage too, but those limits are
+// not published as stable numbers — so nothing is assumed: you enter what your
+// plan allows, and reported usage is measured against it over a rolling window.
+function hoursLabel(h) { return h === 168 ? '7 days' : h + ' hours'; }
+
+function providerLimitCard(p) {
+  return `<div class="card mt16">
+    <div class="card-head"><h2>${esc(p.label)}</h2>
+      <span class="hint">${p.configured ? 'measured from usage reported to PromptMeter' : 'enter your plan’s limit to track it'}</span></div>
+    ${p.windows.map(w => `<div class="limit-row">
+      <div class="spread"><strong>${esc(w.name)} window</strong>
+        <span class="small muted tnum">${w.limit
+          ? `${w.unit === 'usd' ? usd(w.used) : num(w.used)} of ${w.unit === 'usd' ? usd(w.limit) : num(w.limit)}
+             ${w.unit === 'usd' ? '' : 'requests'} · last ${esc(hoursLabel(w.hours))}`
+          : `${num(w.turns)} request${w.turns === 1 ? '' : 's'} · ${usd(w.usd)} in the last ${esc(hoursLabel(w.hours))}`}</span></div>
+      ${w.limit
+        ? meter(w.pct, 'used ' + pct(w.pct), w.frees_at ? 'room frees ' + when(w.frees_at) : '')
+        : `<div class="meter"><div class="meter-track unknown" role="img" aria-label="no limit set"></div>
+             <div class="meter-legend"><span>no limit set</span><span></span></div></div>`}
+      <div class="row mt8" style="gap:8px;flex-wrap:wrap">
+        <input id="lim-${esc(p.provider)}-${esc(w.id)}" type="number" min="0" step="any" style="max-width:160px"
+          placeholder="your limit" aria-label="${esc(p.label)} ${esc(w.name)} limit" value="${w.limit == null ? '' : esc(String(w.limit))}">
+        <select id="lim-${esc(p.provider)}-${esc(w.id)}-u" style="max-width:190px" aria-label="unit">
+          <option value="turns" ${w.unit === 'turns' ? 'selected' : ''}>requests</option>
+          <option value="usd" ${w.unit === 'usd' ? 'selected' : ''}>dollars (list price)</option>
+        </select>
       </div>
-    </div>
-    ${activeProjectsCard(s)}`;
-  }
-  return `
-  <div class="page-head"><div><h1>Windows</h1><div class="sub">One question before this assumes anything.</div></div></div>
-  <div class="card">
-    <div class="label">Before this page shows anything</div>
-    <div class="hero">Are you on a Claude Pro or Max plan?</div>
-    <p class="small muted mt8" style="max-width:60ch">This screen tracks the 5-hour and weekly usage
-      limits Anthropic enforces on a Claude subscription, read automatically from Claude Code's local
-      sessions. If that's not what you're using PromptMeter for, there's nothing this page can show —
-      Plan a prompt and Projects work the same either way.</p>
+    </div>`).join('')}
+    <div class="row mt12"><button class="btn-primary btn-sm" onclick="saveLimits('${esc(p.provider)}')">Save these limits</button></div>
+    <div class="small muted mt8" style="max-width:72ch">A rolling window over usage reported to PromptMeter, not your provider's own reset
+      clock. Leave a box blank to stop tracking that window.</div>
+  </div>`;
+}
+
+function providerLimitCards(lim) {
+  return ((lim && lim.providers) || []).map(providerLimitCard).join('');
+}
+
+async function saveLimits(provider) {
+  const prefix = 'lim-' + provider + '-';
+  const windows = {};
+  document.querySelectorAll('input[id^="' + prefix + '"]').forEach(inp => {
+    const wid = inp.id.slice(prefix.length);
+    const unit = (document.getElementById(inp.id + '-u') || {}).value || 'turns';
+    windows[wid] = { limit: inp.value, unit };
+  });
+  try {
+    await api('/api/limits', { method: 'POST', body: { provider, windows } });
+    toast('Limits saved.');
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
+function subscriptionIntro() {
+  return `<div class="scallop"></div>
+  <h2 class="section-title">Subscription limits</h2>
+  <p class="small muted" style="margin:-8px 0 0;max-width:74ch">Track the plans you actually pay for. Claude's windows are read from
+    Claude Code; for Codex and Gemini you enter what your plan allows.</p>`;
+}
+
+// Claude's 5-hour / weekly plan windows are one integration, not the app's
+// identity: they exist only for a Claude subscription, so they sit behind an
+// opt-in and everything else on this screen works without them.
+function planWindowOptIn(wp) {
+  return `<div class="card mt16">
+    <div class="card-head"><h2>Claude (Pro / Max)</h2>
+      <span class="hint">optional — read from Claude Code</span></div>
+    <p class="small muted" style="max-width:64ch">A Claude Pro or Max subscription enforces a rolling 5-hour and a
+      weekly limit, and this app can track how much of each you have used from Claude Code's sessions.
+      Codex and Gemini plans are below.</p>
     <div class="row mt12">
-      <button class="btn-primary btn-sm" onclick="setWindowsProvider('claude')">Yes, track it</button>
-      <button class="btn-sm" onclick="setWindowsProvider('other')">No, I use something else</button>
+      <button class="btn-primary btn-sm" onclick="setWindowsProvider('claude')">I have a Claude plan — track it</button>
+      ${wp === 'other' ? '' : `<button class="btn-sm" onclick="setWindowsProvider('other')">Not for me</button>`}
     </div>
+  </div>`;
+}
+
+function renderWindowsGate(s, wp, u, lim) {
+  return `
+  <div class="page-head">
+    <div><h1>Usage</h1><div class="sub">What your AI agents have cost, whichever ones you use.</div></div>
+    <button class="btn-sm" onclick="go('plan')">Plan a prompt</button>
   </div>
+  ${usageByModelCard(u)}
+  ${subscriptionIntro()}
+  ${wp === 'other' ? '' : planWindowOptIn(wp)}
+  ${wp === 'other' ? `<p class="small muted mt12">Using a Claude subscription?
+    <a href="#" onclick="setWindowsProvider('claude');return false">Turn on Claude plan-window tracking</a>.</p>` : ''}
+  ${providerLimitCards(lim)}
   ${activeProjectsCard(s)}`;
 }
 
@@ -324,7 +405,9 @@ async function viewDashboard() {
   const s = await api('/api/status');
   S.status = s;
   const wp = (s.settings || {}).windows_provider || '';
-  if (wp !== 'claude') return renderWindowsGate(s, wp);
+  const u = await api('/api/usage/summary').catch(() => ({ models: [], turns: 0, cost: 0 }));
+  const lim = await api('/api/limits').catch(() => ({ providers: [] }));
+  if (wp !== 'claude') return renderWindowsGate(s, wp, u, lim);
   const hist = await api('/api/meter/history?hours=30').catch(() => ({ points: [] }));
   const f = s.five_hour, w = s.seven_day;
   const unmetered = f.used == null && w.used == null;
@@ -365,19 +448,22 @@ async function viewDashboard() {
 
   return `
   <div class="page-head">
-    <div>
-      <h1>Windows</h1>
-      <div class="sub">${
-        s.source === 'status line' ? 'Live from the Claude Code status line · ' + ago(s.observed_at)
-        : s.source === 'your reading' ? 'Synced from Claude ' + ago(s.observed_at) + ' · counting down on its own'
-        : s.source === 'transcripts' ? `From ${s.derived.turns} local session turns · last activity ${ago(s.observed_at)}`
-        : 'No numbers yet — press “Sync from Claude”'}</div>
-    </div>
-    <div class="row">
-      <button class="btn-sm btn-primary" onclick="manualEntry()">Sync from Claude</button>
-      <button class="btn-sm" onclick="go('plan')">Plan a prompt</button>
-    </div>
+    <div><h1>Usage</h1><div class="sub">What your AI agents have cost, whichever ones you use.</div></div>
+    <button class="btn-sm" onclick="go('plan')">Plan a prompt</button>
   </div>
+
+  ${usageByModelCard(u)}
+
+  <!-- Claude's 5-hour / weekly limits are one provider's plan limits, so they sit
+       in a section of their own *below* the all-agent table — not as the page. -->
+  ${subscriptionIntro()}
+  <h2 class="provider-title">Claude (Pro / Max)</h2>
+  <p class="small muted" style="margin:0 0 14px;max-width:70ch">${
+    s.source === 'status line' ? 'Live from the Claude Code status line · ' + ago(s.observed_at)
+    : s.source === 'your reading' ? 'Synced from Claude ' + ago(s.observed_at) + ' · counting down on its own'
+    : s.source === 'transcripts' ? `From ${s.derived.turns} local Claude Code turns · last activity ${ago(s.observed_at)}`
+    : 'No numbers yet — press “Sync from Claude”'}
+    · <a href="#" onclick="setWindowsProvider('other');return false">Hide Claude limits</a></p>
 
   ${firstRun ? `
   <div class="card">
@@ -497,6 +583,8 @@ async function viewDashboard() {
         <div class="small mt8"><strong>Fix:</strong> ${esc(l.fix)}</div>
       </div>`).join('')}
   </div>` : ''}
+
+  ${providerLimitCards(lim)}
 
   ${activeProjectsCard(s)}`;
 }
@@ -679,20 +767,20 @@ async function viewPlan() {
   const pv = await api('/api/providers').catch(() => ({ active: 'heuristic', keys: {} }));
   const sel = (S.models || []).find(m => m.id === S.model);
   return `
-  <section>
-    <div class="eyebrow">PromptMeter</div>
-    <h1>Know what it costs<br>before you send it.</h1>
-    <p class="lede">Estimate the tokens, the dollars and the odds of hitting a wall — for any model —
-      then split the work into steps you can track. All of it computed on this machine.</p>
+  <section class="hero-block">
+    <div class="eyebrow">PromptMeter · for any AI agent</div>
+    <h1>Know what it costs<br>before you <span class="mark">send it.</span></h1>
+    <p class="lede">see the price, the risk and the split — for any model you use, before it costs you.</p>
   </section>
   ${accordion([
     { title: 'Estimate any prompt', hue: 1, art: 'gauge', go: 'focus-prompt', cta: 'Try a prompt',
-      text: 'Tokens, cost and the chance of being cut off — with a plain-English verdict, for Claude, GPT, Gemini or a local model.' },
-    { title: 'Split it into steps', hue: 2, art: 'graph', go: 'projects', cta: 'See projects',
+      text: 'Tokens, cost and the chance of being cut off — with a plain-English verdict, for any model: Claude, GPT, Gemini, Mistral, a local one, or one you add.' },
+    { title: 'Split it into steps', hue: 2, art: 'graph', go: 'projects', cta: 'See your projects',
       text: 'Big asks become a dependency graph of small steps, each with its own budget, model and a check for when it is done.' },
-    { title: 'Watch it against reality', hue: 3, art: 'trace', go: 'dashboard', cta: 'Open windows',
-      text: 'Real usage is tracked as you work, so plan limits, spend and estimate accuracy come from your history, not guesses.' },
+    { title: 'Watch it against reality', hue: 3, art: 'trace', go: 'dashboard', cta: 'Open usage',
+      text: 'Real usage from any agent is tracked as you work, so spend and estimate accuracy come from your history, not guesses.' },
   ])}
+  <div class="scallop"></div>
   <h2 class="section-title" id="p-form">Plan a prompt</h2>
   <div class="grid grid-2">
     <div class="card">
@@ -733,14 +821,14 @@ async function viewPlan() {
           : ` <span class="muted">using ${esc(pv.active)}</span>`}</span>
       </label>
       <div class="row">
-        <button class="btn-primary" onclick="doPreview()">Estimate</button>
+        <button class="btn-primary" onclick="doPreview()">See what it costs</button>
         <button onclick="commitPlan()" id="p-create" disabled>Create project</button>
       </div>
     </div>
     <div id="p-out">
       <div class="card"><div class="empty">
         <div class="big">Nothing estimated yet</div>
-        <div class="small">Paste a prompt and press Estimate. Nothing is sent anywhere —
+        <div class="small">Paste a prompt and press “See what it costs”. Nothing is sent anywhere —
           the estimate is computed on this machine.</div>
       </div></div>
     </div>
@@ -1008,9 +1096,9 @@ function renderPreview(p) {
              And a step that goes wrong now costs ${usd(sv.blast_radius_after)} instead of
              ${usd(sv.blast_radius_before)}.`
           : `<strong>This split costs about ${usd(sv.optimised_split - sv.single_run)} more.</strong>
-             Do it anyway only for the reasons that are not about price: it fits inside your window,
-             and a step that goes wrong costs ${usd(sv.blast_radius_after)} instead of
-             ${usd(sv.blast_radius_before)}. If neither matters, set Splitting to “Never split”.`}
+             Do it anyway only for the reasons that are not about price: ${isClaudeModel(e.model)
+               ? 'it fits inside your window, and a' : 'a'} step that goes wrong costs ${usd(sv.blast_radius_after)}
+             instead of ${usd(sv.blast_radius_before)}. If that does not matter, set Splitting to “Never split”.`}
       </div>
     </div>`; })() : ''}
   </div>
@@ -1070,11 +1158,14 @@ function modelLabel(id) {
 // A Claude plan window only exists for Anthropic models — showing "% of a
 // 5-hour window" beside a GPT/Gemini/local run states a number that means
 // nothing for that model, the same leak plain.py's vendor branch already
-// guards against on the Plan screen (see explain()). Defaults to true so an
-// id we haven't loaded model metadata for yet doesn't suppress the figure.
+// guards against on the Plan screen (see explain()). An id the catalogue
+// doesn't know is NOT assumed to be Claude — that assumption is what made every
+// other agent look like a Claude run. Only before the catalogue has loaded at
+// all do we say yes, so the figure isn't flashed off during startup.
 function isClaudeModel(id) {
+  if (!S.models.length) return true;
   const m = S.models.find(x => x.id === id);
-  return m ? m.vendor === 'anthropic' : true;
+  return !!m && m.vendor === 'anthropic';
 }
 
 async function commitPlan() {
@@ -1726,24 +1817,25 @@ async function viewSetup() {
   c.capacity_usd5 = (s.capacity || {}).usd_per_5h;
 
   const banner = w.turns === 0
-    ? ['warning', `<strong>Nothing recorded yet.</strong> Send one message in Claude Code — terminal or desktop app — then press “Check now” below.`]
+    ? ['warning', `<strong>No usage recorded yet.</strong> Claude Code sessions are picked up on their own; connect any other agent below.`]
     : c.capacity_basis === 'measured'
-      ? ['good', `<strong>All set.</strong> ${num(w.turns)} turns tracked automatically, and your window size is measured. Nothing left to do.`]
-      : ['good', `<strong>Tracking automatically.</strong> ${num(w.turns)} turns recorded with no setup. Percentages are based on a plan estimate — one reading makes them exact.`];
+      ? ['good', `<strong>All set.</strong> ${num(w.turns)} turns tracked from Claude Code, and your plan window is measured.`]
+      : ['good', `<strong>Tracking automatically.</strong> ${num(w.turns)} turns recorded from Claude Code with no setup. Using another agent? Connect it below.`];
 
   return `
   <div class="page-head">
     <div><h1>Setup</h1>
-      <div class="sub">Usage tracks itself. This page shows what it can see and how to make it exact.</div></div>
+      <div class="sub">Connect the agents you use, and add any model that is not in the list.</div></div>
   </div>
 
   <div class="banner ${banner[0]}">${banner[1]}</div>
 
   <details class="card mt16">
-    <summary><strong>Automatic tracking detail</strong>
+    <summary><strong>Claude Code session tracking</strong>
       <span class="small muted">— ${num(w.turns)} turns, ${w.sessions} session${w.sessions === 1 ? '' : 's'}, last checked ${w.last_scan ? ago(w.last_scan) : 'never'}</span></summary>
     <p class="small mt12">Claude Code writes every turn to a session file on this machine; PromptMeter
-      reads those files, covering both the terminal and the desktop app, with nothing to configure.</p>
+      reads those files with nothing to configure. This is one automatic source — other agents report
+      their usage in the card below.</p>
     <div class="row mt8">
       <button class="btn-sm" onclick="doScan(false)">Check now</button>
       <button class="btn-sm" onclick="doScan(true)">Re-read everything</button>
@@ -1764,8 +1856,43 @@ async function viewSetup() {
   </details>
 
   <div class="card">
-    <div class="card-head"><h2>Live status line</h2>
-      <span class="hint">terminal only · optional extra precision</span></div>
+    <div class="card-head"><h2>Connect any agent</h2>
+      <span class="hint">Codex, Gemini CLI, Cursor, Aider, your own scripts — anything</span></div>
+    <p class="small" style="max-width:68ch">PromptMeter does not care which assistant did the work. An agent
+      (or a hook or wrapper around it) reports each turn, and it is priced from the same catalogue and counted
+      in projects, History and Usage exactly like a Claude Code turn. Nothing leaves this machine.</p>
+    <div class="label mt12">From a command line or hook</div>
+    <div class="prompt-box mt8" id="usage-cli">python -m promptmeter --log-usage --model gpt-5.3-codex --in-tokens 12000 --out-tokens 900 --agent codex</div>
+    <div class="row mt8"><button class="btn-sm" onclick="copyText('usage-cli','Command copied.')">Copy</button></div>
+    <div class="label mt12">Or over HTTP while the app is running</div>
+    <div class="prompt-box mt8" id="usage-http">POST /api/usage   {"model": "gpt-5.3-codex", "in_tokens": 12000, "out_tokens": 900, "agent": "codex"}
+header  X-PromptMeter-Token: (the csrf_token from GET /api/status)
+optional  cost_usd, cache_read, cache_write, cwd, ts, id (makes a retry safe), or {"records": [ ... ]}</div>
+    <div class="small muted mt8">Not sure of a token count? Send <span class="mono">cost_usd</span> and the
+      turn is recorded at that price. A model PromptMeter has not heard of is flagged “unpriced” rather than
+      silently treated as Claude — add its price below.</div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>Your own models</h2>
+      <span class="hint">any model, any provider — Mistral, DeepSeek, Grok, a self-hosted one</span></div>
+    <p class="small" style="max-width:68ch">Add a model and it appears in the Plan screen's picker and is priced
+      correctly everywhere. You only need its name and its price per million tokens.</p>
+    ${customModelsList()}
+    <div class="grid grid-2 mt12" style="gap:10px;max-width:760px">
+      <div class="field"><label>Model id (as the agent reports it)</label><input id="cm-id" placeholder="mistral-large-latest"></div>
+      <div class="field"><label>Display name</label><input id="cm-label" placeholder="Mistral Large"></div>
+      <div class="field"><label>Vendor</label><input id="cm-vendor" placeholder="Mistral"></div>
+      <div class="field"><label>Context window (tokens)</label><input id="cm-context" type="number" min="1024" placeholder="128000"></div>
+      <div class="field"><label>Input price, $ per million tokens</label><input id="cm-in" type="number" min="0" step="any" placeholder="2"></div>
+      <div class="field"><label>Output price, $ per million tokens</label><input id="cm-out" type="number" min="0" step="any" placeholder="6"></div>
+    </div>
+    <div class="row"><button class="btn-primary btn-sm" onclick="saveCustomModel()">Add model</button></div>
+  </div>
+
+  <div class="card">
+    <div class="card-head"><h2>Claude Code live status line</h2>
+      <span class="hint">Claude Code terminal only · optional</span></div>
 
     <p class="small">Optional extra precision for the terminal: Claude Code hands PromptMeter the exact
       percentages, second by second, instead of the estimate automatic tracking already gives you.</p>
@@ -2016,6 +2143,44 @@ async function checkOllama() {
   }
 }
 
+function customModelsList() {
+  const mine = (S.models || []).filter(m => m.custom);
+  if (!mine.length) return '<div class="small muted mt8">None yet.</div>';
+  return `<table class="mt8"><thead><tr><th>Model</th><th>Vendor</th><th class="num">In $/M</th>
+    <th class="num">Out $/M</th><th></th></tr></thead><tbody>${mine.map(m => `<tr>
+      <td>${esc(m.label)}<div class="small muted mono">${esc(m.id)}</div></td>
+      <td>${esc(m.vendor_label || m.vendor)}</td><td class="num">${esc(String(m.in))}</td>
+      <td class="num">${esc(String(m.out))}</td>
+      <td class="num"><button class="btn-sm btn-danger" onclick="removeCustomModel('${esc(m.id)}')">Remove</button></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+async function refreshModels() {
+  const m = await api('/api/models');
+  S.models = m.models; S.vendors = m.vendors || [];
+}
+
+async function saveCustomModel() {
+  const v = id => (document.getElementById(id) || {}).value || '';
+  try {
+    const saved = await api('/api/models/custom', { method: 'POST', body: {
+      id: v('cm-id').trim(), label: v('cm-label').trim(), vendor: v('cm-vendor').trim(),
+      context: v('cm-context'), in: v('cm-in'), out: v('cm-out') } });
+    await refreshModels();
+    toast(saved.repriced ? `Model added. Repriced ${saved.repriced} earlier turn${saved.repriced === 1 ? '' : 's'}.` : 'Model added.');
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
+async function removeCustomModel(id) {
+  try {
+    await api('/api/models/custom?id=' + encodeURIComponent(id), { method: 'DELETE' });
+    await refreshModels();
+    toast('Removed.');
+    render();
+  } catch (e) { toast(e.message, true); }
+}
+
 async function doScan(full) {
   try {
     const r = await api('/api/setup/scan', { method: 'POST', body: { full: !!full } });
@@ -2226,7 +2391,7 @@ document.addEventListener('pointermove', e => {
         S.surface = s.settings.surface || S.surface;
       }
     }
-    if (!m.models.some(x => x.id === S.model)) S.model = m.models[0]?.id || S.model;
+    if (!m.models.some(x => x.id === S.model)) S.model = m.default_model || m.models[0]?.id || S.model;
     localStorage.setItem('pm-model', S.model);
     localStorage.setItem('pm-effort', S.effort);
   } catch {}

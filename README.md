@@ -1,8 +1,9 @@
 # PromptMeter
 
-**Know what a prompt will cost you before you send it — and whether it fits in what's left of your plan.**
+**Know what a prompt will cost you before you send it — whichever AI model or agent you use.**
 
-A small local app for anyone working on a Claude Pro or Max plan. It estimates
+A small local app for anyone working with AI coding agents — Claude, GPT/Codex, Gemini,
+Mistral, a local model, or one you add yourself. It estimates
 what a prompt will cost, scores how likely it is to hit a wall, splits it into
 steps when splitting actually helps, tracks each project's progress, and learns
 your real usage as you go.
@@ -28,7 +29,7 @@ p-deliverible/
 ├── promptmeter/         THE ENGINE — all the logic, pure Python
 │   └── data/              prices, plan sizes, task priors — edit these
 │
-├── web/                 THE INTERFACE — 3 files, no build step
+├── web/                 THE INTERFACE — 3 files + 1 bundled font, no build step
 ├── shim/                THE LIVE METER — optional, 1 file
 ├── tests/                stdlib unittest suite
 │
@@ -61,7 +62,7 @@ python -m promptmeter
 
 Your browser opens at <http://127.0.0.1:7777>. To stop it, press Ctrl+C.
 
-First time in, click **Load sample data** on the Windows page to see the app with
+First time in, click **Load sample data** on the Usage page to see the app with
 a few days of plausible history in it. **Clear sample data** on the Setup page
 removes just that; **Erase everything** clears real data too.
 
@@ -76,13 +77,12 @@ Double-click `start.bat`. The browser opens at `127.0.0.1:7777`. Nothing to
 install beyond Python.
 
 ### 2 — Say what you're tracking
-**Windows** asks once, on first visit: are you on a Claude Pro or Max plan?
-Say yes and it tracks your 5-hour/weekly windows from a sensible default size;
-say no (or you use GPT/Gemini/a local model instead) and it skips straight to
-Plan a prompt and Projects, which work the same either way.
+**Usage** shows what every agent you use has cost, by model. If you also have a
+Claude Pro or Max subscription, opt in to **Subscription plan windows** there to
+track your 5-hour and weekly limits; if you don't, nothing else depends on it.
 
 ### 3 — Sync one reading *(recommended, 10 seconds)*
-**Windows → Sync from Claude.** Open Claude's own usage view — the ring beside
+**Usage → Sync from Claude** *(Claude subscriptions only).* Open Claude's own usage view — the ring beside
 the model picker in the desktop app, or `/usage` in the terminal — and copy the
 four values across. PromptMeter divides them into the spend it has already
 recorded and solves for your window's true size. After this the basis reads
@@ -127,18 +127,46 @@ you find out.
 
 | Screen | What it answers |
 |---|---|
-| **Windows** | How much of my 5-hour and weekly limits is left, and when do I run out at this rate? |
+| **Usage** | What have my agents cost, by model — and, on a Claude plan, how much of my 5-hour and weekly limits is left? |
 | **Plan a prompt** | What will this cost in tokens and dollars, how risky is it, does it need splitting? |
 | **Projects** | What am I working on, how far along is each one, what has it cost? |
 | **History** | What has PromptMeter learned about my usage, and were its estimates right? |
-| **Setup** | Connecting a provider to draft your steps, the live status line, and your data. |
+| **Setup** | Connecting any agent, adding your own models, drafting steps with a provider, and your data. |
 
 A persistent bar above every screen — surface, plan, model, reasoning effort —
 is set once and applies to every new plan, so you don't re-pick it per prompt.
 
 ---
 
-## Connecting the live meter, step by step (Windows)
+## Using an agent that isn't Claude
+
+Nothing here depends on Claude. Estimates, splitting, projects and History work
+for any model, and an unrecognised model is flagged **unpriced** rather than
+silently costed as Claude.
+
+- **Add any model.** Setup → *Your own models*: a name, a vendor and the price
+  per million tokens in and out. It joins the Plan picker and is priced
+  correctly everywhere; turns you logged before adding the price are re-priced.
+- **Report an agent's usage** (Codex, Gemini CLI, Cursor, Aider, a script, a hook):
+
+  ```
+  python -m promptmeter --log-usage --model gpt-5.3-codex --in-tokens 12000 --out-tokens 900 --agent codex
+  ```
+
+  or `POST /api/usage` while the app runs (see Setup → *Connect any agent* for the
+  fields, including `cost_usd` if you already know the price). It counts toward
+  project spend, learning and History like any other turn.
+- **Track a Codex or Gemini subscription.** Usage → *Subscription limits* has a card
+  each for Codex (ChatGPT plan: 5-hour and weekly) and Gemini (daily). Enter what
+  your plan allows, in requests or dollars, and PromptMeter measures the usage
+  reported for that provider's models against it over a rolling window. Nothing is
+  pre-filled: plan quotas aren't published as fixed numbers.
+- **What stays Claude-only:** the 5-hour and weekly *subscription* windows, the
+  Claude Code session tracker and its live status line. Other assistants meter
+  differently, so their usage is never added to a Claude window, and their
+  estimates are never judged against one.
+
+## Connecting the Claude Code live meter, step by step (Windows)
 
 When this is done, PromptMeter shows the same numbers as Claude's own usage
 dialog, updating by itself, covering **all** your usage including Cowork. Total
@@ -186,7 +214,7 @@ Python from [python.org/downloads](https://www.python.org/downloads/) and tick
 claude
 ```
 Type anything — `hi` will do. A usage bar appears at the bottom of the Claude
-Code window, and PromptMeter's Windows page turns green with your real
+Code window, and PromptMeter's Usage page turns green with your real
 percentages. The one message is needed because Claude Code only receives the
 limit numbers after its first reply in a session.
 
@@ -199,7 +227,7 @@ is a local script making no API calls.
 own. With no session running, the numbers keep ticking from the last reading —
 countdowns run down, bars reset themselves at a window rollover. To re-sync
 immediately after heavy Cowork/browser use, open a terminal session for a
-moment, or use **Sync from Claude** on the Windows page.
+moment, or use **Sync from Claude** on the Usage page.
 
 **Undo:** the **Undo** button on the Setup page, or `python -m promptmeter
 --disconnect`. Your other settings are untouched.

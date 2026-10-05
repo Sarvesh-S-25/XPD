@@ -122,7 +122,7 @@ def growth_estimate(task_class: str) -> float:
     return max(400.0, _quantile(deltas, 0.5))
 
 
-def profile(task_class: str, model: str = "claude-sonnet-5") -> dict:
+def profile(task_class: str, model: str | None = None) -> dict:
     """Blended prediction profile for a (task class, model) pair."""
     pri = pricing.priors().get(task_class) or pricing.priors()["multi_file_feature"]
     pt50, pt95 = float(pri["turns"][0]), float(pri["turns"][1])

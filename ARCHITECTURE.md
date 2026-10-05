@@ -1470,6 +1470,136 @@ around). Zero-install rule kept: no images, web fonts or libraries.
   the handler, not by physical keys. The other four screens were restyled by
   the shared tokens rather than redesigned card by card.
 
+### Not Claude-dedicated (September 2026, part 6) — explicit user direction
+
+Direction, verbatim in spirit: "I need every AI agent to work — it must not be
+Claude dedicated." An audit found the app was Claude-first well below the copy:
+in the pricing layer, the risk engine and the usage ledger. This pass fixes
+those, not just the words. Gemini was not consulted (its CLI is not installed
+here — a setup problem, noted, not worked around).
+
+- **An unknown model was silently Claude — HIGH → fixed.** `pricing.price_of()`
+  fell back to Claude Sonnet's price *and* the `anthropic` vendor for any model
+  outside the catalogue, so Mistral, DeepSeek, Grok or a self-hosted model were
+  costed as Claude and shown Claude plan-window percentages. The fallback is now
+  vendor `other`, tier `custom`, and `pricing.is_known()` lets every caller say
+  so; the UI labels such models **unpriced** instead of hiding it.
+- **Claude's subscription windows drove every model's verdict — HIGH → fixed.**
+  `estimate()` fed the user's *Claude* window into the risk score for all models
+  (a Gemini prompt was "risky" because a Claude window was nearly full),
+  `should_split()` forced splits with "needs X% of the 5-hour window", and the
+  results screen showed a "packed into 5-hour windows" schedule and "128% of
+  window". `estimate()` now returns `plan_metered`; without a plan window the
+  headroom is `NO_WINDOW_HEADROOM` (exactly risk_score's neutral band — no
+  pressure, no comfort bonus), the split rule and the schedule are skipped, and
+  the savings sentence drops "fits inside your window".
+- **Any model can be added — new.** `pricing.custom_models()` / Setup → *Your own
+  models* (`POST/DELETE /api/models/custom`): name, vendor, $/M in and out,
+  context. Each custom model gets its own vendor id and a tier that never
+  matches the routing ladder, so a step is never moved onto a *different*
+  provider's model (the repo's first bug, §12). Picker groups are built for
+  custom vendors; adding a price re-prices earlier turns the app computed and
+  never one an agent supplied as `cost_usd` (`watcher.reprice_model`).
+- **Any agent can report usage — new.** `watcher.add_usage()`, `POST
+  /api/usage`, `GET /api/usage/summary` and `python -m promptmeter --log-usage`
+  (for hooks and wrappers that have no HTTP token). Rows land in `turns` with
+  `source='api'`, priced from the same catalogue, all-or-nothing validation,
+  idempotent by client `id`. They count for project spend, learning and History.
+  **Every `meter.py` query is restricted to `source='transcript'`**: a Codex turn
+  is real spend but was not drawn from a Claude subscription window, so it must
+  never move one — pinned by `tests/test_any_agent.py`, which fail if the filter
+  is removed.
+- **No hard-coded Claude default — MED → fixed.** Twelve places defaulted to
+  `claude-sonnet-5`. They now resolve through `pricing.default_model()`: your last
+  pick, else the model you use most (turns + iterations), else a model from the
+  vendor of the provider you connected, else the first catalogue entry (only on
+  an install with no signal at all). A source-level test forbids the literal in
+  the server, estimator, planner, learning and `app.js`.
+- **Screens.** *Windows* became **Usage**: it leads with usage by model across
+  every agent, and Claude plan windows are an opt-in section ("Subscription plan
+  windows") rather than a question standing in front of everything. `isClaudeModel()`
+  no longer assumes an unknown id is Claude. Setup's Claude sections are labelled
+  as Claude Code integrations, and gained *Connect any agent* and *Your own
+  models*. README rewritten agent-neutral.
+- **Claude no longer *is* the Usage page.** A first cut still opened the screen with a
+  full-width Claude dashboard (window hero, two rings, "Sync from Claude") and appended the
+  all-agent table underneath, so on a machine with Claude data Claude was the page and every
+  other agent a footnote. The order is now inverted: usage by model for every agent first,
+  identical for everyone, then a "Claude subscription limits" section with its own heading
+  and a "Hide this section" link, in the same slot any other provider's plan limits would
+  take. No Claude action remains in the page header (pinned by `tests/test_frontend.py`).
+- **Caught while doing it:** a `→` in a CLI message crashed printing on a default
+  Windows console (cp1252); an unpriced model was labelled "unknown" instead of
+  its own id.
+- **Still open / honest limits.** The only *automatic* usage source is still
+  Claude Code's transcripts: this machine has no other agent's logs, so writing
+  parsers for Codex, Gemini CLI or Cursor formats would mean guessing at files I
+  cannot test. Other agents report through `--log-usage` / `POST /api/usage`; a
+  parser for a specific agent is now a small addition behind `add_usage()` once a
+  real log is available to test against. The task-class priors (A2) were
+  written with Claude-style loops in mind and are unchanged. The unknown-model
+  fallback price (a Sonnet-like $2/$10) is a placeholder, flagged, not a
+  measurement. Built-in models still list Claude first in the picker.
+
+### Awwards design system (September 2026, part 7) — explicit user direction
+
+Direction: "change the UI as well", pointing at a design system the user owns
+(**Awwards**, a Design System artifact). This replaces the black look of part 5;
+its layout mechanics (top bar, accordion) are kept. A design canvas of the new
+Plan and Usage screens was published alongside (a Design artifact,
+"PromptMeter redesign") with the system installed on it. Gemini was not
+consulted (its CLI is not installed here — a setup problem, noted).
+
+- **What the system is, and how it maps.** Six warm colours (beige, brown-dark,
+  dark-green, green-dark, green-darker, light), one electric-blue accent reserved
+  for focus rings and a single highlight moment, Archivo in Regular and Extended,
+  flat square cards with a hairline, a slight tilt and a hard-offset shadow, pill
+  buttons, scalloped dividers. PromptMeter maps it as: page = brown-dark, cards =
+  dark-green, buttons/active states/meter fills = beige, banners = tinted panels,
+  headlines = uppercase Extended with the hard text-shadow. The light theme is the
+  same six colours turned over (beige page, paper cards). Data colours (good/
+  warning/serious/critical, model-tier series) stay functional, not brand.
+- **Colour rules are enforced, not remembered.** Brand hexes live once in the
+  `:root` token blocks; every rule after them uses a token (`tests/test_frontend.py`
+  strips the token blocks and fails on any remaining hex or `rgba()`). `--accent-focus`
+  may appear only in focus rules and `.mark`. Contrast is computed from the tokens
+  for both themes: every text pair is >= 4.5:1. That check found two light-theme
+  status colours just under (4.33, 4.32) which were darkened, and the tests were
+  shown to fail when a colour is broken.
+- **The system's own flags, honoured.** Its README notes light-on-beige fails
+  (1.16:1), so text on beige is always dark-green (8.64:1); blue on the dark
+  surfaces is only 2.66:1, so every focus ring gets a light halo; and "no
+  left-border cards" — `.banner` lost its coloured left edge for a tinted panel.
+- **Archivo is bundled, not linked.** The system's README says to load it from
+  Google Fonts; that is a network call, which this app promises never to make.
+  `web/fonts/archivo-latin.woff2` (90 KB, OFL) is one variable file carrying both
+  widths (`font-stretch` 62-125%). Served as `font/woff2` (added to the server's
+  mimetypes; it is missing from some Pythons' tables). A test forbids any external
+  font/asset reference. This is the first non-text file in `web/`.
+- **Voice.** Second-person, warm microcopy (the Plan button reads "See what it
+  costs"; one lowercase intimate lead, once).
+- **Subscription limits for Codex and Gemini, not only Claude — new
+  (`promptmeter/limits.py`, `GET/POST /api/limits`).** Direction: "in the usage
+  panel also add for Gemini and Codex subscriptions." Claude's 5-hour/weekly
+  windows are read from Claude Code; the other providers meter differently and
+  publish no stable numbers, so this module assumes none. You enter what your plan
+  allows (per window, in requests or list-price dollars) and reported usage from
+  that provider's models is measured against it: Codex/ChatGPT gets a 5-hour and a
+  weekly window, Gemini a daily one. An unset limit renders hatched "no limit set",
+  never an empty bar. Windows are *rolling* (the last N hours), not aligned to the
+  provider's own reset clock, which is not observable from here, and the UI says so;
+  `frees_at` reports when the oldest counted turn leaves the window. Turns are
+  matched by the model's vendor, so another agent's usage (or a custom model) is
+  never counted against the wrong plan. The Usage screen's section is now
+  "Subscription limits" with Claude, Codex and Gemini as peers; hiding Claude does
+  not hide the others. Presentation and storage only: nothing feeds an estimate.
+  "Code subscriptions" was read as Codex.
+- **Deliberately not done.** The brief's brushstroke edge masks, an icon set and
+  on-scroll reveals were left out: the first two need artwork this repo doesn't
+  have, and the last conflicts with "never hide content by default" for a tool that
+  reads numbers. Card tilt is small (about 0.25-0.6 degrees) and on cards only, so
+  form text stays crisp.
+
 ### Still open, ranked
 
 **P3 — step status is still manual, one-click-closer.** Turns attribute

@@ -71,6 +71,20 @@ class StaticServingTest(LiveServerTest):
         self.assertIn(".acc-item", css)
         self.assertIn("function accordion", js)
 
+    def test_the_bundled_font_is_served_as_a_font(self):
+        # not in every Python's mimetypes table; octet-stream here would make some
+        # browsers refuse the face and the whole design falls back to system type
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        try:
+            conn.request("GET", "/fonts/archivo-latin.woff2")
+            r = conn.getresponse()
+            data = r.read()
+        finally:
+            conn.close()
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.getheader("Content-Type"), "font/woff2")
+        self.assertEqual(data[:4], b"wOF2")
+
     def test_never_cached(self):
         _, _, r = self.call("GET", "/app.js")
         self.assertEqual(r.getheader("Cache-Control"), "no-store")
@@ -285,6 +299,116 @@ class ProjectLifecycleTest(LiveServerTest):
 
     def test_unknown_project_is_404(self):
         self.assertEqual(self.call("GET", "/api/projects/99999")[0], 404)
+
+
+class AnyAgentApiTest(LiveServerTest):
+    def test_usage_endpoint_records_a_non_claude_turn(self):
+        status, body, _ = self.call("POST", "/api/usage", {"model": "gpt-5.3-codex", "in_tokens": 1000,
+                                                          "out_tokens": 100, "agent": "codex"})
+        self.assertEqual(status, 200)
+        self.assertEqual(body["added"], 1)
+        _, summary, _ = self.call("GET", "/api/usage/summary")
+        self.assertEqual(summary["models"][0]["model"], "gpt-5.3-codex")
+        self.assertEqual(summary["models"][0]["vendor"], "openai")
+
+    def test_usage_accepts_a_batch_and_needs_the_token(self):
+        recs = {"records": [{"model": "a", "in_tokens": 1}, {"model": "b", "in_tokens": 1}]}
+        self.assertEqual(self.call("POST", "/api/usage", recs, token=False)[0], 403)
+        status, body, _ = self.call("POST", "/api/usage", recs)
+        self.assertEqual((status, body["added"]), (200, 2))
+
+    def test_usage_rejects_bad_input_with_a_message_not_a_500(self):
+        for payload in ({}, {"model": "m", "in_tokens": "x"}, {"model": "m", "in_tokens": -1},
+                        {"records": []}, {"records": "nope"}):
+            status, body, _ = self.call("POST", "/api/usage", payload)
+            self.assertEqual(status, 400, payload)
+            self.assertTrue(body["error"])
+
+    def test_reported_usage_never_makes_the_install_look_like_claude(self):
+        self.call("POST", "/api/usage", {"model": "gpt-5.3-codex", "in_tokens": 5000})
+        _, got, _ = self.call("GET", "/api/settings")
+        self.assertEqual(got["windows_provider"], "")
+
+    def test_custom_model_lifecycle(self):
+        body = {"id": "mistral-large", "label": "Mistral Large", "vendor": "Mistral",
+                "in": 2, "out": 6, "context": 128000}
+        status, models, _ = self.call("POST", "/api/models/custom", body)
+        self.assertEqual(status, 200)
+        added = next(m for m in models["models"] if m["id"] == "mistral-large")
+        self.assertTrue(added["custom"])
+        self.assertEqual(added["vendor"], "custom-mistral")
+        self.assertIn("Mistral", [v["label"] for v in models["vendors"]])
+        # it can now be estimated and is priced as itself, with no window prose
+        _, prev, _ = self.call("POST", "/api/preview", {"prompt": "fix the typo in auth.py", "model": "mistral-large"})
+        self.assertEqual(prev["estimate"]["spec"]["vendor"], "custom-mistral")
+        self.assertNotIn("session", json.dumps(prev["plain"]).lower())
+        status, after, _ = self.call("DELETE", "/api/models/custom?id=mistral-large")
+        self.assertEqual(status, 200)
+        self.assertNotIn("mistral-large", [m["id"] for m in after["models"]])
+        self.assertEqual(self.call("DELETE", "/api/models/custom?id=mistral-large")[0], 404)
+
+    def test_adding_a_price_reprices_turns_logged_before_it(self):
+        self.call("POST", "/api/usage", {"model": "mistral-large", "in_tokens": 1_000_000, "id": "m1"})
+        _, before, _ = self.call("GET", "/api/usage/summary")
+        self.assertFalse(before["models"][0]["known"])
+        status, saved, _ = self.call("POST", "/api/models/custom",
+                                     {"id": "mistral-large", "label": "Mistral Large", "vendor": "Mistral",
+                                      "in": 0.5, "out": 1})
+        self.assertEqual((status, saved["repriced"]), (200, 1))
+        _, after, _ = self.call("GET", "/api/usage/summary")
+        self.assertTrue(after["models"][0]["known"])
+        self.assertEqual(after["models"][0]["label"], "Mistral Large")
+        self.assertAlmostEqual(after["models"][0]["cost"], 0.5, places=3)
+
+    def test_custom_model_validation(self):
+        base = {"id": "m1", "in": 1, "out": 1}
+        for bad in ({**base, "id": ""}, {**base, "id": "has space"}, {**base, "id": "../x"},
+                    {**base, "in": -1}, {**base, "out": "cheap"}, {**base, "context": 10}):
+            self.assertEqual(self.call("POST", "/api/models/custom", bad)[0], 400, bad)
+
+    def test_unknown_model_estimate_is_not_branded_as_claude(self):
+        _, prev, _ = self.call("POST", "/api/preview", {"prompt": "fix the typo in auth.py", "model": "grok-9"})
+        self.assertEqual(prev["estimate"]["spec"]["vendor"], "other")
+        self.assertNotIn("session", json.dumps(prev["plain"]).lower())
+
+    def test_default_model_follows_usage_not_a_hardcoded_vendor(self):
+        _, m0, _ = self.call("GET", "/api/models")
+        for i in range(2):
+            self.call("POST", "/api/usage", {"model": "gemini-3.1-pro", "in_tokens": 10, "id": f"g{i}"})
+        _, m1, _ = self.call("GET", "/api/models")
+        self.assertEqual(m1["default_model"], "gemini-3.1-pro")
+        _, st, _ = self.call("GET", "/api/settings")
+        self.assertEqual(st["model"], "gemini-3.1-pro")
+
+
+class LimitsApiTest(LiveServerTest):
+    def test_get_lists_codex_and_gemini_with_nothing_assumed(self):
+        status, body, _ = self.call("GET", "/api/limits")
+        self.assertEqual(status, 200)
+        self.assertEqual([p["provider"] for p in body["providers"]], ["openai", "google"])
+        self.assertTrue(all(w["limit"] is None for p in body["providers"] for w in p["windows"]))
+
+    def test_saving_a_limit_measures_reported_usage_against_it(self):
+        for i in range(3):
+            self.call("POST", "/api/usage", {"model": "gpt-5.3-codex", "in_tokens": 100, "id": f"u{i}"})
+        status, body, _ = self.call("POST", "/api/limits",
+                                    {"provider": "openai", "windows": {"5h": {"limit": 12, "unit": "turns"}}})
+        self.assertEqual(status, 200)
+        w = next(w for p in body["providers"] if p["provider"] == "openai" for w in p["windows"] if w["id"] == "5h")
+        self.assertEqual((w["used"], w["limit"], w["pct"]), (3, 12.0, 25.0))
+
+    def test_other_agents_usage_does_not_count_for_this_plan(self):
+        self.call("POST", "/api/usage", {"model": "gemini-3.1-pro", "in_tokens": 100, "id": "g1"})
+        _, body, _ = self.call("POST", "/api/limits", {"provider": "openai", "windows": {"5h": {"limit": 5}}})
+        w = next(w for p in body["providers"] if p["provider"] == "openai" for w in p["windows"] if w["id"] == "5h")
+        self.assertEqual(w["used"], 0)
+
+    def test_bad_input_is_a_400_and_needs_the_token(self):
+        self.assertEqual(self.call("POST", "/api/limits", {"provider": "openai", "windows": {"5h": {"limit": 1}}},
+                                   token=False)[0], 403)
+        for payload in ({"provider": "anthropic", "windows": {}}, {"provider": "openai", "windows": {"5h": {"limit": -1}}},
+                        {"provider": "openai", "windows": {"5h": {"limit": "x"}}}, {"provider": "", "windows": {}}):
+            self.assertEqual(self.call("POST", "/api/limits", payload)[0], 400, payload)
 
 
 if __name__ == "__main__":

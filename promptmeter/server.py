@@ -13,10 +13,11 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import (db, estimator, installer, learning, meter, oracles, plain,
+from . import (db, estimator, installer, learning, limits, meter, oracles, plain,
                planner, pricing, providers, scope, segmenter, watcher)
 
 WEB = Path(__file__).resolve().parent.parent / "web"
+mimetypes.add_type("font/woff2", ".woff2")   # not in every Python's table; without it the font is served as octet-stream
 ROUTES: list[tuple[str, re.Pattern, callable]] = []
 
 # One random token per process, required on every mutating request. It never
@@ -159,7 +160,7 @@ def api_preview(_m, _q, body):
     cap = _parse_cap(body.get("turn_cap"))
     return planner.preview(
         prompt,
-        model=body.get("model") or "claude-sonnet-5",
+        model=body.get("model") or pricing.default_model(),
         workdir=body.get("workdir") or "",
         turn_cap=cap,
         force=body.get("force") or "auto",
@@ -211,7 +212,7 @@ def _windows_provider() -> str:
     wp = db.get_setting("windows_provider", "")
     if wp:
         return wp
-    has_signal = (db.scalar("SELECT COUNT(*) FROM turns", (), 0) or 0) > 0 or \
+    has_signal = (db.scalar("SELECT COUNT(*) FROM turns WHERE source='transcript'", (), 0) or 0) > 0 or \
                  (db.scalar("SELECT COUNT(*) FROM meter WHERE session_id NOT IN ('demo')", (), 0) or 0) > 0
     if has_signal:
         db.set_setting("windows_provider", "claude")
@@ -224,7 +225,7 @@ def _user_settings() -> dict:
     picked once and reused everywhere, instead of per prompt. `plan` is not
     here; it already has its own persisted setting and route below."""
     return {
-        "model": db.get_setting("default_model", "claude-sonnet-5"),
+        "model": pricing.default_model(),
         "effort": db.get_setting("default_effort", pricing.DEFAULT_EFFORT),
         # restricted to what meter.py can actually see (both write the same
         # transcript format) — Cowork/browser usage is real but untrackable,
@@ -261,6 +262,7 @@ def api_models(_m, _q, _b):
         "vendors": pricing.by_vendor(),
         "efforts": pricing.EFFORTS,
         "default_effort": pricing.DEFAULT_EFFORT,
+        "default_model": pricing.default_model(),
         "task_classes": [{"id": k, **v} for k, v in pricing.priors().items()],
         "oracles": [{"id": k, "label": v} for k, v in oracles.KINDS.items()],
     }
@@ -287,7 +289,7 @@ def api_create(_m, _q, body):
     pid = planner.create_project(
         body.get("name") or "",
         prompt,
-        model=body.get("model") or "claude-sonnet-5",
+        model=body.get("model") or pricing.default_model(),
         workdir=body.get("workdir") or "",
         force=body.get("force") or "auto",
         goal=body.get("goal") or "",
@@ -662,6 +664,83 @@ def api_clear_demo(_m, _q, _b):
     db.run("DELETE FROM projects WHERE is_demo=1")
     db.run("DELETE FROM meter WHERE is_demo=1")
     return {"cleared_projects": n}
+
+
+# ================================================================ any agent
+
+@route("POST", "/api/usage")
+def api_usage(_m, _q, body):
+    """Usage reported by any agent — one record, or {"records": [...]}.
+
+    {"model": "gpt-5.3-codex", "in_tokens": 1200, "out_tokens": 300,
+     "agent": "codex", "cwd": "C:/proj", "ts": 1780000000, "id": "run-42"}
+    Priced through the same catalogue as everything else; send cost_usd to
+    override. `id` makes a retry idempotent.
+    """
+    recs = body.get("records") if isinstance(body.get("records"), list) else \
+        ([body] if body.get("model") else [])
+    try:
+        return watcher.add_usage(recs)
+    except ValueError as e:
+        raise Err(400, str(e))
+
+
+@route("GET", "/api/usage/summary")
+def api_usage_summary(_m, _q, _b):
+    return watcher.usage_summary()
+
+
+@route("GET", "/api/limits")
+def api_limits(_m, _q, _b):
+    """Subscription limits for Codex/ChatGPT and Gemini plans: what you told us
+    your plan allows, and what reported usage has used of it."""
+    return limits.get()
+
+
+@route("POST", "/api/limits")
+def api_limits_save(_m, _q, body):
+    try:
+        return limits.save(str(body.get("provider") or ""), body.get("windows") or {})
+    except ValueError as e:
+        raise Err(400, str(e))
+
+
+_MODEL_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:\-]{0,79}$")
+
+
+@route("POST", "/api/models/custom")
+def api_custom_model_save(_m, _q, body):
+    """Add (or overwrite) your own model so any agent's model can be estimated
+    and shows up in the picker. Only the fields a person knows: name, vendor,
+    $ per million tokens in and out, context window."""
+    mid = str(body.get("id") or "").strip()
+    if not _MODEL_ID.match(mid):
+        raise Err(400, "Model id: letters, digits and . _ : - only (max 80).")
+    raw = {k: body.get(k) for k in ("label", "vendor", "in", "out", "context", "max_output")
+           if body.get(k) not in (None, "")}
+    try:
+        pricing.build_custom(mid, raw)                    # validates
+    except ValueError as e:
+        raise Err(400, str(e))
+    custom = dict(db.get_setting("custom_models") or {})
+    if len(custom) >= 200 and mid not in custom:
+        raise Err(400, "That is a lot of custom models — remove some first.")
+    custom[mid] = raw
+    # Turns already logged for this model were priced with the old (or
+    # fallback) price; let the ones we computed follow the new one.
+    repriced = watcher.reprice_model(mid, lambda: db.set_setting("custom_models", custom))
+    return {**api_models(None, None, None), "repriced": repriced}
+
+
+@route("DELETE", "/api/models/custom")
+def api_custom_model_delete(_m, q, _b):
+    mid = (q.get("id") or [""])[0]
+    custom = dict(db.get_setting("custom_models") or {})
+    if mid not in custom:
+        raise Err(404, "No such custom model.")
+    del custom[mid]
+    db.set_setting("custom_models", custom)
+    return api_models(None, None, None)
 
 
 # ================================================================ plumbing

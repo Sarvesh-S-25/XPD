@@ -12,7 +12,7 @@ from . import db, server
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="promptmeter",
-                                 description="Local plan-window budgeting for Claude work.")
+                                 description="Local cost, risk and usage budgeting for work done with any AI agent.")
     ap.add_argument("--port", type=int, default=7777)
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--no-browser", action="store_true")
@@ -24,9 +24,23 @@ def main(argv=None) -> int:
                     help="remove the status line setting, then exit")
     ap.add_argument("--force", action="store_true",
                     help="with --connect, replace an existing status line")
+    ap.add_argument("--log-usage", action="store_true",
+                    help="record one turn from any agent (needs --model), then exit — "
+                         "for hooks and wrappers")
+    ap.add_argument("--model", help="with --log-usage: the model id, e.g. gpt-5.3-codex")
+    ap.add_argument("--in-tokens", type=int, default=0)
+    ap.add_argument("--out-tokens", type=int, default=0)
+    ap.add_argument("--cache-read", type=int, default=0)
+    ap.add_argument("--agent", default="", help="with --log-usage: a label, e.g. codex")
+    ap.add_argument("--cwd", default="", help="with --log-usage: the project folder")
+    ap.add_argument("--cost", type=float, default=None,
+                    help="with --log-usage: the real cost in USD, if you have it")
     args = ap.parse_args(argv)
 
     db.init()
+
+    if args.log_usage:
+        return _log_usage(args)
 
     if args.where:
         print(db.db_path())
@@ -50,6 +64,25 @@ def main(argv=None) -> int:
         print(f"\n  Could not start on port {args.port}: {e}")
         print(f"  Try:  python -m promptmeter --port {args.port + 1}\n")
         return 1
+    return 0
+
+
+def _log_usage(args) -> int:
+    from . import watcher
+    if not args.model:
+        print("\n  --log-usage needs --model (e.g. --model gpt-5.3-codex).")
+        return 2
+    rec = {"model": args.model, "in_tokens": args.in_tokens, "out_tokens": args.out_tokens,
+           "cache_read": args.cache_read, "agent": args.agent, "cwd": args.cwd}
+    if args.cost is not None:
+        rec["cost_usd"] = args.cost
+    try:
+        r = watcher.add_usage([rec])
+    except ValueError as e:
+        print(f"\n  Not recorded: {e}")
+        return 2
+    print(f"\n  Recorded {r['added']} turn for {args.model}."
+          + (f"\n  {r['note']}" if r["note"] else ""))
     return 0
 
 

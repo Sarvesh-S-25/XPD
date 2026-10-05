@@ -669,26 +669,6 @@ details[open] summary { margin-bottom: 8px; }
   --media-scrim-mid: rgba(0, 0, 0, .45);
 }
 
-:root[data-theme="dark"] {
-  --page: #000;
-  --surface-1: #0a0a0b;
-  --text-primary: #f4f4f5;
-  --text-secondary: #b4b4ba;
-  --text-muted: #7f7f87;
-  --grid: #1b1b1f;
-  --baseline: #34343a;
-  --border: rgba(255, 255, 255, .12);
-  --raise: rgba(255, 255, 255, .06);
-  --glass: rgba(255, 255, 255, .035);
-  --glass-border: rgba(255, 255, 255, .11);
-  --track: #1a1a1f;
-  --track-warm: #202026;
-  --cta-bg: #f4f4f5;
-  --cta-ink: #000;
-}
-/* The reference has no ambient colour at all — black is the point. */
-:root[data-theme="dark"] body::before { display: none; }
-
 /* ------------------------------------------------------------ type */
 h1, h2, h3 { font-family: var(--display); }
 h1 { font-size: clamp(30px, 4.2vw, 48px); font-weight: 700; letter-spacing: -0.035em; line-height: 1.04; }
@@ -804,3 +784,249 @@ input, textarea, select { border-radius: 14px; padding: 10px 14px; }
 
 input[type="checkbox"] { accent-color: var(--accent); }
 .step-head input[type="checkbox"] { margin: 4px 2px 0 0; flex: 0 0 auto; }
+
+/* ==================================================================
+   Awwards pass (September 2026, part 7) — explicit user direction:
+   restyle the whole UI to the "Awwards" design system (a design system the
+   user owns; six warm colours, one focus accent, Archivo in two widths, flat
+   square cards with a hairline, a slight tilt and a hard-offset shadow, pill
+   buttons, scalloped dividers). This layer supersedes the black look of the
+   cinematic pass above; its structure (top bar, accordion mechanics) stays.
+
+   Colour discipline (pinned by tests/test_frontend.py): brand hexes are
+   declared once, in the :root token blocks below; every rule after them uses a
+   token. --accent-focus (electric blue) is for focus rings and ONE highlight
+   moment (the marker behind the Plan headline), never general UI.
+   ================================================================== */
+
+/* Archivo, bundled (web/fonts/) rather than linked from Google Fonts: this app
+   promises no network calls. One variable file carries both cuts the system
+   asks for: Regular width for text and UI, Extended (font-stretch 125%) for
+   display and CTAs. SIL Open Font License 1.1. */
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 100 900;
+  font-stretch: 62% 125%;
+  font-display: swap;
+  src: url("/fonts/archivo-latin.woff2") format("woff2");
+}
+
+:root {
+  --beige: #D9CDAD;
+  --brown-dark: #594D40;
+  --dark-green: #2F2E25;
+  --green-dark: #465016;
+  --green-darker: #23280B;
+  --light: #DFDDCB;
+  --accent-focus: #3D5AFE;
+  /* One step below --light, for quieter text. Checked >= 4.5:1 on brown-dark,
+     dark-green and green-darker (tests/test_frontend.py computes it). */
+  --light-2: #CFCBB6;
+
+  --font: "Archivo", "Segoe UI Variable Text", system-ui, sans-serif;
+  --display: "Archivo", "Segoe UI Variable Display", system-ui, sans-serif;
+  --r: 0px;                      /* cards are flat: character comes from the hairline + tilt */
+  --r-sm: 0px;
+  --hairline: color-mix(in srgb, var(--light) 35%, transparent);
+  --nav-bg: var(--dark-green);
+  --nav-ink: var(--light);
+  --inset: var(--green-darker);
+  --card-drop: 4px 4px 0 var(--green-darker);
+  --ease-in: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-out: cubic-bezier(0.55, 0, 1, 0.45);
+  --ease-pop: cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: var(--brown-dark);
+  --surface-1: var(--dark-green);
+  --text-primary: var(--light);
+  --text-secondary: var(--light);
+  --text-muted: var(--light-2);
+  --grid: color-mix(in srgb, var(--light) 16%, transparent);
+  --baseline: color-mix(in srgb, var(--light) 35%, transparent);
+  --border: color-mix(in srgb, var(--light) 30%, transparent);
+  --raise: color-mix(in srgb, var(--light) 9%, transparent);
+  --glass: var(--dark-green);
+  --glass-border: var(--hairline);
+  --accent: var(--beige);
+  --accent-ink: var(--dark-green);
+  --cta-bg: var(--beige);
+  --cta-ink: var(--dark-green);
+  --track: var(--green-darker);
+  --track-warm: var(--green-darker);
+  --inset: var(--green-darker);
+  --card-drop: 4px 4px 0 var(--green-darker);
+  --good: #7CCB52;
+  --warning: #F2C14E;
+  --serious: #F0965E;
+  --critical: #FF8F7E;
+  --success-text: #9AD870;
+  --warning-bg: color-mix(in srgb, var(--warning) 20%, var(--dark-green));
+  --serious-bg: color-mix(in srgb, var(--serious) 20%, var(--dark-green));
+  --blob-1: var(--beige);
+  --blob-2: var(--light);
+  --blob-3: var(--beige);
+}
+
+/* The same six colours turned over: a beige page with paper-coloured cards. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --page: var(--beige);
+  --surface-1: var(--light);
+  --text-primary: var(--dark-green);
+  --text-secondary: var(--dark-green);
+  --text-muted: var(--green-dark);
+  --grid: color-mix(in srgb, var(--dark-green) 20%, transparent);
+  --baseline: color-mix(in srgb, var(--dark-green) 40%, transparent);
+  --border: color-mix(in srgb, var(--dark-green) 35%, transparent);
+  --raise: color-mix(in srgb, var(--dark-green) 8%, transparent);
+  --hairline: color-mix(in srgb, var(--dark-green) 40%, transparent);
+  --glass: var(--light);
+  --glass-border: var(--hairline);
+  --accent: var(--green-dark);
+  --accent-ink: var(--light);
+  --cta-bg: var(--dark-green);
+  --cta-ink: var(--light);
+  --track: color-mix(in srgb, var(--dark-green) 14%, var(--light));
+  --track-warm: color-mix(in srgb, var(--dark-green) 14%, var(--light));
+  --inset: color-mix(in srgb, var(--dark-green) 7%, var(--light));
+  --card-drop: 4px 4px 0 color-mix(in srgb, var(--dark-green) 55%, var(--beige));
+  --good: #2E7D1E;
+  --warning: #7A5000;
+  --serious: #96401A;
+  --critical: #A3261C;
+  --success-text: #2E6B14;
+  --warning-bg: color-mix(in srgb, #F2C14E 35%, var(--light));
+  --serious-bg: color-mix(in srgb, #F0965E 30%, var(--light));
+  --blob-1: var(--green-dark);
+  --blob-2: var(--brown-dark);
+  --blob-3: var(--green-dark);
+}
+
+/* ------------------------------------------------------------ ground */
+body { background: var(--page); font-family: var(--font); color: var(--text-primary); }
+body::before {
+  display: block; inset: 0; filter: none; animation: none;
+  background: radial-gradient(color-mix(in srgb, var(--green-darker) 24%, transparent) 1px, transparent 1.3px) 0 0 / 7px 7px;
+}
+
+/* ------------------------------------------------------------ type */
+h1, .hero { font-family: var(--display); font-stretch: 125%; text-transform: uppercase; letter-spacing: -0.03em; line-height: 1; }
+h1 { font-size: clamp(1.9rem, 4.2vw, 3.6rem); font-weight: 700; text-shadow: 3px 5px 0 var(--green-darker); overflow-wrap: anywhere; }
+.hero { font-size: clamp(1.3rem, 2.6vw, 2.2rem); font-weight: 700; }
+h2 { font-family: var(--font); font-weight: 700; letter-spacing: -0.02em; font-size: 1.15rem; }
+.section-title { font-size: clamp(1.75rem, 3.5vw, 3rem); }
+.hero-block h1 { font-size: clamp(2.5rem, 6vw, 5.5rem); }
+.hero-block .lede { font-size: clamp(1.15rem, 2vw, 1.75rem); font-weight: 500; line-height: 1.25; max-width: 40ch; color: var(--text-primary); }
+.page-head .sub { color: var(--text-primary); font-size: 1.05rem; }
+.eyebrow, .label, .field > label, th {
+  font-family: var(--font); font-weight: 700; text-transform: uppercase; letter-spacing: 0.16em; font-size: 0.72rem; color: var(--text-muted);
+}
+.eyebrow { letter-spacing: 0.22em; font-size: 0.8rem; color: var(--text-primary); }
+.stat-value, .ring-meta .n { font-family: var(--display); font-stretch: 125%; font-weight: 700; }
+td.num, th.num, .kv dd { font-family: var(--font); font-variant-numeric: tabular-nums; }
+.mark { background: linear-gradient(transparent 56%, var(--accent-focus) 56%); padding: 0 0.12em; }
+
+/* ------------------------------------------------------------ top bar */
+.sidebar { background: var(--nav-bg); color: var(--nav-ink); border-bottom: 0; border-top: 0; backdrop-filter: none; }
+.brand > div > div { font-family: var(--display); font-stretch: 125%; text-transform: uppercase; letter-spacing: -0.02em; color: var(--nav-ink); font-size: 1.1rem; }
+.brand small { color: var(--light-2); }
+.brand-mark { border-radius: 0; background: var(--beige); color: var(--dark-green); font-family: var(--display); }
+.nav-item {
+  color: var(--nav-ink); font-family: var(--display); font-stretch: 125%; font-weight: 700; font-size: 0.8rem;
+  border: 1.5px solid color-mix(in srgb, var(--light) 45%, transparent); border-radius: 9999px; padding: 7px 16px;
+  transition: transform 150ms var(--ease-pop), background-color 150ms ease, color 150ms ease;
+}
+.nav-item:hover { background: color-mix(in srgb, var(--light) 12%, transparent); transform: scale(1.06) rotate(1deg); color: var(--nav-ink); }
+.nav-item.active { background: var(--beige); color: var(--dark-green); border-color: var(--beige); box-shadow: 3px 3px 0 var(--green-darker); font-weight: 700; }
+#theme-toggle { border-style: dashed; }
+
+/* A scalloped strip instead of a plain rule under the nav and between sections. */
+.scallop, .content-pane::before {
+  content: ""; display: block; height: 16px;
+  background: radial-gradient(circle at 12px 0, transparent 11px, var(--green-dark) 12px) repeat-x;
+  background-size: 24px 16px;
+}
+.scallop { margin: 48px 0 8px; }
+
+/* ------------------------------------------------------------ surfaces */
+.card, .proj, .step, .modal {
+  background: var(--glass); border: 1px solid var(--glass-border); border-radius: 0;
+  box-shadow: var(--card-drop); backdrop-filter: none; -webkit-backdrop-filter: none;
+}
+.card::after, .proj::after { display: none; }
+.main > .card:nth-of-type(odd), .grid > .card:nth-child(odd), .grid > .proj:nth-child(odd) { transform: rotate(-0.25deg); }
+.main > .card:nth-of-type(even), .grid > .card:nth-child(even), .grid > .proj:nth-child(even) { transform: rotate(0.25deg); }
+.proj { transition: transform 150ms var(--ease-pop); }
+.proj:hover { transform: scale(1.02) rotate(0.6deg); border-color: var(--glass-border); }
+.toast { background: var(--glass); border: 1px solid var(--glass-border); border-radius: 0; box-shadow: var(--card-drop); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.modal-bg { background: color-mix(in srgb, var(--green-darker) 70%, transparent); }
+
+/* Banners: a whole tinted panel, not a coloured left edge. */
+.banner { background: var(--green-dark); border: 1px solid var(--hairline); border-left-width: 1px; border-radius: 0; color: var(--light); }
+.banner.warning  { background: var(--warning-bg); color: var(--text-primary); }
+.banner.critical { background: var(--serious-bg); color: var(--text-primary); }
+.banner.good     { background: color-mix(in srgb, var(--good) 22%, var(--glass)); color: var(--text-primary); }
+:root[data-theme="light"] .banner { background: color-mix(in srgb, var(--green-dark) 16%, var(--light)); color: var(--text-primary); }
+
+/* ------------------------------------------------------------ controls */
+button, .btn {
+  font-family: var(--display); font-stretch: 125%; font-weight: 700; font-size: 0.8rem; border-radius: 9999px; padding: 8px 18px;
+  background: transparent; color: var(--text-primary); border: 1.5px solid color-mix(in srgb, var(--text-primary) 45%, transparent);
+  transition: transform 150ms var(--ease-pop), background-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
+}
+button:hover, .btn:hover { background: var(--raise); border-color: var(--text-primary); box-shadow: none; transform: scale(1.06) rotate(1deg); }
+button:active, .btn:active { transform: scale(0.98); }
+.btn-sm { font-size: 0.72rem; padding: 5px 13px; border-radius: 9999px; }
+.btn-primary, .btn-primary:hover { background: var(--cta-bg); color: var(--cta-ink); border-color: var(--cta-bg); box-shadow: 3px 3px 0 var(--green-darker); filter: none; }
+.btn-primary:hover { transform: scale(1.06) rotate(1deg); }
+.btn-danger { color: var(--critical); border-color: color-mix(in srgb, var(--critical) 60%, transparent); }
+.btn-danger:hover { box-shadow: none; background: color-mix(in srgb, var(--critical) 14%, transparent); }
+input, textarea, select {
+  background: var(--inset); color: var(--text-primary); border: 1px solid var(--hairline); border-radius: 0; font-family: var(--font);
+}
+.tab { border-radius: 9999px; font-family: var(--display); font-stretch: 125%; font-weight: 700; font-size: 0.78rem; color: var(--text-primary); }
+.tab.active { background: var(--beige); color: var(--dark-green); }
+:root[data-theme="light"] .tab.active { background: var(--dark-green); color: var(--light); }
+.chip { background: var(--inset); border: 1px solid var(--hairline); color: var(--text-primary); }
+.step-num, .prompt-box, .segbar, .graph-wrap { background: var(--inset); border-radius: 0; }
+.meter-track, .progress-track, .meter-fill, .progress-fill { border-radius: 0; }
+.meter-track { border: 1px solid var(--hairline); }
+.kv dt { color: var(--text-muted); }
+details summary { color: var(--text-primary); }
+
+/* Focus is the one place the blue accent works: a ring, with a light halo so it
+   stays visible on the dark-green cards (the system flags it at only 2.66:1
+   there on its own). */
+:focus-visible, input:focus, textarea:focus, select:focus {
+  outline: 3px solid var(--accent-focus); outline-offset: 2px; box-shadow: 0 0 0 2px var(--light);
+}
+:root[data-theme="light"] :focus-visible, :root[data-theme="light"] input:focus { box-shadow: 0 0 0 2px var(--dark-green); }
+
+/* ------------------------------------------------------------ accordion */
+.acc { gap: 22px; }
+.acc-item {
+  --hue: var(--beige);
+  border-radius: 0; border: 1px solid var(--hairline); box-shadow: var(--card-drop); background: var(--dark-green);
+}
+.acc-item:nth-child(1) { --acc-bg: var(--green-dark); transform: rotate(-0.6deg); }
+.acc-item:nth-child(2) { --acc-bg: var(--dark-green); transform: rotate(0.6deg); }
+.acc-item:nth-child(3) { --acc-bg: var(--green-darker); transform: rotate(-0.4deg); }
+.acc-item[data-hue] { --hue: var(--beige); }
+.acc-item.open { border-color: var(--beige); }
+.acc-art { background: var(--acc-bg, var(--dark-green)); }
+.acc-title { font-stretch: 125%; text-transform: uppercase; font-weight: 700; font-size: 1.5rem; }
+.acc-cta { background: var(--beige); color: var(--dark-green); font-family: var(--display); font-stretch: 125%; font-weight: 700; }
+.acc-idx { font-family: var(--font); font-weight: 700; letter-spacing: 0.22em; }
+
+@media (prefers-reduced-motion: reduce) {
+  button:hover, .btn:hover, .nav-item:hover, .proj:hover, .btn-primary:hover { transform: none; }
+}
+
+/* Subscription limits: one block per plan, each window a row. */
+.provider-title { margin: 22px 0 6px; font-size: 1.25rem; }
+.limit-row { padding: 14px 0; border-bottom: 1px solid var(--grid); }
+.limit-row:last-of-type { border-bottom: 0; }

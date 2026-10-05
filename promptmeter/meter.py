@@ -30,6 +30,11 @@ DEFAULT_ALPHA7 = 0.9
 
 # ---------------------------------------------------------------- ingest
 
+# The 5-hour / weekly percentages are a *Claude subscription* concept, so every
+# turns query in this module is restricted to Claude Code's own transcripts
+# (source = 'transcript'). Usage other agents report through POST /api/usage
+# (source = 'api') is real spend and counts for projects, learning and history,
+# but must never be added to a Claude plan window it was not drawn from.
 def ingest(payload: dict) -> dict:
     """Accept one status-line JSON blob. Every field is optional and defensive."""
     rl = payload.get("rate_limits") or {}
@@ -165,7 +170,7 @@ def raw_window_spend() -> tuple[float, float, int]:
     from . import watcher
     watcher.init()
     now = time.time()
-    rows = db.rows("SELECT ts, cost_usd FROM turns WHERE ts >= ? ORDER BY ts",
+    rows = db.rows("SELECT ts, cost_usd FROM turns WHERE ts >= ? AND source = 'transcript' ORDER BY ts",
                    (now - SEVEN_DAYS,))
     if not rows:
         return 0.0, 0.0, 0
@@ -234,7 +239,7 @@ def derived() -> dict | None:
 
     def spend_since(t0: float) -> float:
         return float(db.scalar(
-            "SELECT SUM(cost_usd) FROM turns WHERE ts > ?", (t0,), 0.0) or 0.0)
+            "SELECT SUM(cost_usd) FROM turns WHERE ts > ? AND source = 'transcript'", (t0,), 0.0) or 0.0)
 
     if anchor:
         r5 = anchor["resets5"]
@@ -269,14 +274,14 @@ def derived() -> dict | None:
             "cap5": cap5, "cap7": cap7, "basis": basis,
             "anchored_at": anchor["ts"],
             "anchor_pct5": base5, "anchor_pct7": base7,
-            "turns": int(db.scalar("SELECT COUNT(*) FROM turns WHERE ts > ?",
+            "turns": int(db.scalar("SELECT COUNT(*) FROM turns WHERE ts > ? AND source = 'transcript'",
                                    (since5,), 0) or 0),
-            "last_turn": db.scalar("SELECT MAX(ts) FROM turns", (), None),
+            "last_turn": db.scalar("SELECT MAX(ts) FROM turns WHERE source = 'transcript'", (), None),
             "stale_hours": round((now - anchor["ts"]) / 3600.0, 1),
         }
 
     # No reading ever taken — spend only.
-    rows = db.rows("SELECT ts, cost_usd FROM turns WHERE ts >= ? ORDER BY ts",
+    rows = db.rows("SELECT ts, cost_usd FROM turns WHERE ts >= ? AND source = 'transcript' ORDER BY ts",
                    (now - SEVEN_DAYS,))
     if not rows:
         return None
@@ -376,7 +381,7 @@ def burn_rate(hours: float = 6.0) -> dict:
     status-line samples when transcripts are unavailable.
     """
     since = time.time() - hours * 3600
-    tr = db.rows("SELECT ts, cost_usd FROM turns WHERE ts >= ? ORDER BY ts", (since,)) \
+    tr = db.rows("SELECT ts, cost_usd FROM turns WHERE ts >= ? AND source = 'transcript' ORDER BY ts", (since,)) \
         if _has_turns() else []
     if tr:
         cap5, cap7, _ = capacity_usd()
@@ -412,7 +417,7 @@ def burn_rate(hours: float = 6.0) -> dict:
 
 def _has_turns() -> bool:
     try:
-        return bool(db.scalar("SELECT 1 FROM turns LIMIT 1", (), 0))
+        return bool(db.scalar("SELECT 1 FROM turns WHERE source = 'transcript' LIMIT 1", (), 0))
     except Exception:                                   # noqa: BLE001 table absent
         return False
 

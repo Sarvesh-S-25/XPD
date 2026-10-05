@@ -285,3 +285,156 @@ def start() -> None:
 
     _THREAD = threading.Thread(target=loop, daemon=True, name="promptmeter-watcher")
     _THREAD.start()
+
+
+# ------------------------------------------------------- any agent, any model
+#
+# The transcript watcher above is one *source* (Claude Code writes files we can
+# tail). It is not the only way a turn can get into the ledger: any agent — Codex,
+# Gemini CLI, Cursor, Aider, a script, a hook — can report the turns it ran, and
+# they land in the same `turns` table, priced through the same catalogue, so
+# project spend, learning and History work for it exactly as they do for Claude.
+# Rows are tagged source='api' so the Claude plan-window maths (meter.py) can
+# tell them apart and leave them out — a Gemini turn is real spend, but it was
+# not drawn from a Claude subscription window.
+
+MAX_BATCH = 1000
+_USAGE_INT_FIELDS = ("in_tokens", "out_tokens", "cache_read", "cache_write")
+
+
+def _usage_record(i: int, r) -> tuple[dict, bool]:
+    if not isinstance(r, dict):
+        raise ValueError(f"record {i}: must be an object.")
+    model = str(r.get("model") or "").strip()
+    if not model:
+        raise ValueError(f"record {i}: model is required.")
+    n = {}
+    for k in _USAGE_INT_FIELDS:
+        try:
+            v = int(r.get(k) or 0)
+        except (TypeError, ValueError):
+            raise ValueError(f"record {i}: {k} must be a whole number.")
+        if v < 0:
+            raise ValueError(f"record {i}: {k} cannot be negative.")
+        n[k] = v
+    now = time.time()
+    try:
+        ts = float(r.get("ts")) if r.get("ts") not in (None, "") else now
+    except (TypeError, ValueError):
+        raise ValueError(f"record {i}: ts must be a unix timestamp in seconds.")
+    if ts > 1e12:
+        ts /= 1000.0                                  # milliseconds
+    if ts <= 0 or ts > now + 86400:
+        raise ValueError(f"record {i}: ts is not a plausible time.")
+    if r.get("cost_usd") not in (None, ""):
+        try:
+            cost = float(r["cost_usd"])
+        except (TypeError, ValueError):
+            raise ValueError(f"record {i}: cost_usd must be a number.")
+        if cost < 0 or cost != cost:
+            raise ValueError(f"record {i}: cost_usd cannot be negative.")
+    else:
+        cost = pricing.cost_usd(model, n["in_tokens"], n["out_tokens"],
+                                n["cache_read"], n["cache_write"])
+    rid = str(r.get("id") or "").strip()
+    import uuid as _uuid
+    rec = {
+        "uuid": "api:" + (rid or _uuid.uuid4().hex),  # client id makes retries idempotent
+        "ts": ts, "session_id": str(r.get("session_id") or "")[:120],
+        "project": str(r.get("agent") or "")[:60], "cwd": str(r.get("cwd") or "")[:400],
+        "model": model[:120], "in_tokens": n["in_tokens"], "out_tokens": n["out_tokens"],
+        "cache_read": n["cache_read"], "cache_1h": n["cache_write"], "cache_5m": 0,
+        "cost_usd": round(cost, 6),
+    }
+    return rec, pricing.is_known(model)
+
+
+def add_usage(records: list) -> dict:
+    """Record turns reported by any agent. All-or-nothing: one bad record rejects
+    the batch with a message naming it, rather than half-importing."""
+    if not isinstance(records, list) or not records:
+        raise ValueError("Send at least one usage record.")
+    if len(records) > MAX_BATCH:
+        raise ValueError(f"At most {MAX_BATCH} records per request.")
+    parsed, unknown = [], set()
+    for i, r in enumerate(records):
+        rec, known = _usage_record(i, r)
+        parsed.append(rec)
+        if not known:
+            unknown.add(rec["model"])
+    init()
+    conn = db.connect()
+    added = 0
+    for rec in parsed:
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO turns
+               (uuid,ts,session_id,project,cwd,model,in_tokens,out_tokens,
+                cache_read,cache_1h,cache_5m,cost_usd,source)
+               VALUES(:uuid,:ts,:session_id,:project,:cwd,:model,:in_tokens,
+                      :out_tokens,:cache_read,:cache_1h,:cache_5m,:cost_usd,'api')""", rec)
+        added += cur.rowcount
+    conn.commit()
+    return {"added": added, "duplicates": len(parsed) - added,
+            "unknown_models": sorted(unknown),
+            "note": ("Priced with a neutral fallback - add these under Setup > Your own "
+                     "models for exact costs, or send cost_usd yourself.") if unknown else ""}
+
+
+def usage_summary() -> dict:
+    """Everything the ledger has seen, by model — whichever agent produced it."""
+    init()
+    rows = db.rows(
+        """SELECT model, source, COUNT(*) AS turns,
+                  COALESCE(SUM(in_tokens),0) AS in_tokens,
+                  COALESCE(SUM(out_tokens),0) AS out_tokens,
+                  COALESCE(SUM(cache_read),0) AS cache_read,
+                  COALESCE(SUM(cost_usd),0) AS cost, MAX(ts) AS last
+           FROM turns GROUP BY model, source ORDER BY cost DESC""")
+    by_model: dict[str, dict] = {}
+    for r in rows:
+        m = by_model.setdefault(r["model"] or "(unknown)", {
+            "model": r["model"] or "(unknown)", "turns": 0, "in_tokens": 0, "out_tokens": 0,
+            "cache_read": 0, "cost": 0.0, "last": 0.0, "sources": []})
+        m["turns"] += r["turns"]; m["in_tokens"] += r["in_tokens"]
+        m["out_tokens"] += r["out_tokens"]; m["cache_read"] += r["cache_read"]
+        m["cost"] += r["cost"]; m["last"] = max(m["last"], r["last"] or 0)
+        m["sources"].append(r["source"])
+    out = []
+    for m in by_model.values():
+        spec = pricing.spec(m["model"])
+        out.append({**m, "cost": round(m["cost"], 4), "label": spec.get("label") if pricing.is_known(m["model"]) else m["model"],
+                    "vendor": spec.get("vendor"), "known": pricing.is_known(m["model"]),
+                    "sources": sorted(set(m["sources"]))})
+    out.sort(key=lambda x: -x["cost"])
+    return {"models": out,
+            "turns": sum(m["turns"] for m in out),
+            "cost": round(sum(m["cost"] for m in out), 4)}
+
+
+def reprice_model(model: str, save) -> int:
+    """Run `save()` (which changes the catalogue's price for `model`), then
+    recompute the cost of turns that were *computed* from the old price.
+
+    A turn whose stored cost equals what the old catalogue would have produced
+    was priced by us and should follow the new price; one that differs was
+    given an explicit cost_usd by the agent and is left alone — an agent's own
+    number always beats our arithmetic.
+    """
+    init()
+    rows = db.rows(
+        """SELECT uuid,in_tokens,out_tokens,cache_read,cache_1h,cost_usd
+           FROM turns WHERE source='api' AND model=?""", (model,))
+
+    def cost(r):
+        return pricing.cost_usd(model, r["in_tokens"], r["out_tokens"], r["cache_read"], r["cache_1h"])
+
+    old = {r["uuid"]: cost(r) for r in rows}
+    save()
+    n = 0
+    for r in rows:
+        if abs(r["cost_usd"] - old[r["uuid"]]) < 1e-6:
+            new = round(cost(r), 6)
+            if abs(new - r["cost_usd"]) > 1e-9:
+                db.run("UPDATE turns SET cost_usd=? WHERE uuid=?", (new, r["uuid"]))
+                n += 1
+    return n
