@@ -1,4 +1,4 @@
-# PromptMeter
+# PromptMeter/XPD
 
 **Know what a prompt will cost you before you send it — whichever AI model or agent you use.**
 
