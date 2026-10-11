@@ -21,10 +21,9 @@ class MigrationTest(DBTestCase):
         self.assertEqual(before, after)
 
     def test_workspace_id_column_added_with_local_default(self):
-        conn = db.connect()
+        conn = db._PgConn(db.connect()) if db.is_pg() else db.connect()
         for table in ("projects", "meter"):
-            cols = {r[1]: r for r in conn.execute(f"PRAGMA table_info({table})")}
-            self.assertIn("workspace_id", cols)
+            self.assertTrue(db._has_column(conn, table, "workspace_id"), table)
         pid = db.run(
             "INSERT INTO projects(name,created_at,updated_at) VALUES('t',0,0)")
         row = db.row("SELECT workspace_id FROM projects WHERE id=?", (pid,))
@@ -34,8 +33,12 @@ class MigrationTest(DBTestCase):
         # A deliberate scope decision (see the plan's "Where I disagree with
         # Gemini"): settings keeps its plain (key) primary key, not
         # (workspace_id, key) — nothing reads workspace_id there yet.
-        conn = db.connect()
-        cols = [r[1] for r in conn.execute("PRAGMA table_info(settings)")]
+        if db.is_pg():
+            cols = [r["column_name"] for r in db.rows(
+                "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() "
+                "AND table_name = 'settings' ORDER BY ordinal_position")]
+        else:
+            cols = [r[1] for r in db.connect().execute("PRAGMA table_info(settings)")]
         self.assertEqual(cols, ["key", "value"])
 
     def test_approved_column_defaults_to_not_approved(self):

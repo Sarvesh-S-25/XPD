@@ -171,6 +171,8 @@ def _headline(prompt: str) -> str:
 
 
 def _oracle_for(item: dict, task_class: str, workdir: str) -> tuple[str, str]:
+    if db.hosted():
+        return ("manual", "")      # file checks would read the server's disk
     files = [a for a in item["artifacts"] if "." in a and "/" not in a[:1]]
     if files:
         return ("file_exists", ", ".join(files[:4]))

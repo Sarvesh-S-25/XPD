@@ -13,8 +13,9 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from . import (db, estimator, installer, learning, limits, meter, oracles, plain,
-               planner, pricing, providers, scope, segmenter, watcher)
+from . import (accounts, db, estimator, installer, learning, limits, mailer, meter, oracles,
+               plain, planner, pricing, providers, scope, segmenter, watcher)
+import threading
 
 WEB = Path(__file__).resolve().parent.parent / "web"
 mimetypes.add_type("font/woff2", ".woff2")   # not in every Python's table; without it the font is served as octet-stream
@@ -31,6 +32,28 @@ ROUTES: list[tuple[str, re.Pattern, callable]] = []
 CSRF_TOKEN = secrets.token_hex(16)
 CSRF_HEADER = "X-PromptMeter-Token"
 MUTATING = {"POST", "PATCH", "DELETE"}
+
+# Hosted website (db.hosted()): who is making the current request. One request
+# per thread, so a thread-local is per-request.
+_REQ = threading.local()
+SESSION_COOKIE = "pm_session"
+
+# Reachable without signing in (they ARE the sign-in).
+PUBLIC_ROUTES = {("POST", "/api/auth/signup"), ("POST", "/api/auth/login"),
+                 ("POST", "/api/auth/verify"), ("POST", "/api/auth/resend"),
+                 ("POST", "/api/auth/forgot"), ("POST", "/api/auth/reset"),
+                 ("POST", "/api/auth/logout")}
+# Reachable with an agent token (Authorization: Bearer pm_...) instead of a
+# browser session — the one thing an agent needs to do, and nothing else.
+BEARER_ROUTES = {("POST", "/api/usage")}
+# Public routes whose error replies must still commit (their bookkeeping is the point).
+COMMIT_ON_ERROR = {("POST", "/api/auth/login")}
+# Features that act on the machine PromptMeter runs on. On the website that
+# machine is the server, so they are switched off rather than exposed.
+HOSTED_OFF = {("POST", "/api/ingest"), ("POST", "/api/providers"),
+              ("POST", "/api/providers/test"), ("POST", "/api/providers/ollama/check"),
+              ("POST", "/api/setup/scan"), ("POST", "/api/setup/install"),
+              ("POST", "/api/setup/uninstall"), ("POST", "/api/setup/test")}
 
 
 def route(method: str, pattern: str):
@@ -55,7 +78,10 @@ def api_status(_m, _q, _b):
     s = meter.status()
     s["leaks"] = meter.leaks()
     s["token_correction"] = estimator.correction()
-    s["csrf_token"] = CSRF_TOKEN
+    s["csrf_token"] = getattr(_REQ, "csrf", None) if db.hosted() else CSRF_TOKEN
+    s["hosted"] = db.hosted()
+    if db.hosted():
+        s["account"] = {"email": getattr(_REQ, "email", "")}
     s["settings"] = _user_settings()
     s["plans"] = [{"id": k, **v} for k, v in pricing.plans().items()]
     active = db.rows(
@@ -264,7 +290,7 @@ def api_models(_m, _q, _b):
         "default_effort": pricing.DEFAULT_EFFORT,
         "default_model": pricing.default_model(),
         "task_classes": [{"id": k, **v} for k, v in pricing.priors().items()],
-        "oracles": [{"id": k, "label": v} for k, v in oracles.KINDS.items()],
+        "oracles": [{"id": k, "label": v} for k, v in oracles.kinds().items()],
     }
 
 
@@ -319,7 +345,7 @@ def api_project(m, _q, _b):
         s["next_prompt"] = planner.next_prompt(s)
     p["steps"] = steps
     p.update(planner.project_progress(pid))
-    p["oracles"] = [{"id": k, "label": v} for k, v in oracles.KINDS.items()]
+    p["oracles"] = [{"id": k, "label": v} for k, v in oracles.kinds().items()]
     return p
 
 
@@ -362,6 +388,8 @@ def api_step_patch(m, _q, body):
     fields = {k: v for k, v in (body or {}).items()
               if k in ("title", "prompt", "model", "status", "oracle_kind",
                        "oracle_spec", "max_iters", "summary", "approved")}
+    if "oracle_kind" in fields and fields["oracle_kind"] not in oracles.kinds():
+        raise Err(400, "That kind of check isn't available here.")
     if "oracle_kind" in fields or "oracle_spec" in fields:
         fields["approved"] = 0     # changing the check re-arms the confirmation
     if fields.get("status") == "running" and not s["started_at"]:
@@ -593,6 +621,9 @@ def api_graph(m, _q, _b):
 
 @route("GET", "/api/setup")
 def api_setup(_m, _q, _b):
+    if db.hosted():
+        # installer.status() describes the *server's* files — nothing to show a user.
+        return {"hosted": True, "agent_tokens": accounts.list_agent_tokens(_REQ.account_id)}
     s = installer.status()
     st = meter.status()
     s["live"] = st["live"]
@@ -649,6 +680,10 @@ def api_reset(_m, _q, body):
     for t in ("iterations", "steps", "projects", "meter"):
         db.run(f"DELETE FROM {t}")
     db.run("DELETE FROM settings")
+    if db.hosted():
+        # Locally, turns are re-read from Claude Code's files; on the website
+        # they exist only here, and "erase everything" must mean everything.
+        db.run("DELETE FROM turns")
     return {"ok": True}
 
 
@@ -743,7 +778,114 @@ def api_custom_model_delete(_m, q, _b):
     return api_models(None, None, None)
 
 
+# ================================================================ accounts (hosted)
+
+def _send_mail(email: str, kind: str, token: str) -> None:
+    try:
+        mailer.send(email, kind, token)
+    except mailer.MailNotConfigured as e:
+        raise Err(503, f"Email isn't set up on this site yet ({e}).")
+    except Exception as e:                                         # noqa: BLE001
+        raise Err(502, f"Couldn't send the email ({type(e).__name__}). Try again in a minute.")
+
+
+def _auth(fn):
+    def wrapped(m, q, body):
+        try:
+            return fn(m, q, body or {})
+        except accounts.AuthError as e:
+            raise Err(e.status, e.msg)
+    wrapped.__name__ = fn.__name__
+    return wrapped
+
+
+@route("POST", "/api/auth/signup")
+@_auth
+def api_signup(_m, _q, body):
+    return accounts.signup(body.get("email", ""), body.get("password", ""),
+                           getattr(_REQ, "ip", ""), _send_mail)
+
+
+@route("POST", "/api/auth/resend")
+@_auth
+def api_resend(_m, _q, body):
+    return accounts.resend_verification(body.get("email", ""), _send_mail)
+
+
+@route("POST", "/api/auth/verify")
+@_auth
+def api_verify(_m, _q, body):
+    return {"ok": True, "_session": accounts.verify(str(body.get("token", "")))}
+
+
+@route("POST", "/api/auth/login")
+@_auth
+def api_login(_m, _q, body):
+    return {"ok": True, "_session": accounts.login(body.get("email", ""), body.get("password", ""))}
+
+
+@route("POST", "/api/auth/forgot")
+@_auth
+def api_forgot(_m, _q, body):
+    return accounts.forgot(body.get("email", ""), _send_mail)
+
+
+@route("POST", "/api/auth/reset")
+@_auth
+def api_reset_password(_m, _q, body):
+    return {"ok": True, "_session": accounts.reset(str(body.get("token", "")), body.get("password", ""))}
+
+
+@route("POST", "/api/auth/logout")
+def api_logout(_m, _q, _b):
+    accounts.logout(getattr(_REQ, "cookie_token", ""))
+    return {"ok": True, "_clear_session": True}
+
+
+@route("GET", "/api/tokens")
+def api_tokens(_m, _q, _b):
+    if not db.hosted():
+        raise Err(404, "Agent tokens exist only on the hosted website.")
+    return {"tokens": accounts.list_agent_tokens(_REQ.account_id)}
+
+
+@route("POST", "/api/tokens")
+@_auth
+def api_token_create(_m, _q, body):
+    if not db.hosted():
+        raise Err(404, "Agent tokens exist only on the hosted website.")
+    return accounts.create_agent_token(_REQ.account_id, body.get("label", ""))
+
+
+@route("DELETE", "/api/tokens")
+def api_token_revoke(_m, q, _b):
+    if not db.hosted():
+        raise Err(404, "Agent tokens exist only on the hosted website.")
+    if not accounts.revoke_agent_token(_REQ.account_id, (q.get("prefix") or [""])[0]):
+        raise Err(404, "No such token.")
+    return {"tokens": accounts.list_agent_tokens(_REQ.account_id)}
+
+
 # ================================================================ plumbing
+
+_SHARED_READY = False
+_SPACES_READY: set = set()
+
+
+def _ensure_shared() -> None:
+    global _SHARED_READY
+    if not _SHARED_READY:
+        accounts.init_shared()
+        _SHARED_READY = True
+
+
+def _ensure_space(schema: str) -> None:
+    """Bring one account's tables up to date once per process — a migration
+    added after the account was created still reaches it."""
+    if schema not in _SPACES_READY:
+        db.migrate()
+        watcher.init()
+        _SPACES_READY.add(schema)
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "PromptMeter"
@@ -752,20 +894,145 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):        # quiet by default
         pass
 
-    def _send(self, status: int, body: bytes, ctype: str):
+    def _send(self, status: int, body: bytes, ctype: str, extra: list | None = None):
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if db.hosted():
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
+            self.send_header("Content-Security-Policy",
+                             "frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'")
+        for k, v in extra or []:
+            self.send_header(k, v)
         self.end_headers()
         try:
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
-    def _json(self, status: int, obj):
+    def _json(self, status: int, obj, extra: list | None = None):
         self._send(status, json.dumps(obj, default=str).encode("utf-8"),
-                   "application/json; charset=utf-8")
+                   "application/json; charset=utf-8", extra)
+
+    def _read_body(self):
+        """(body, error_reply). The body is always a dict (or None when empty)."""
+        try:
+            length = max(0, int(self.headers.get("Content-Length") or 0))
+        except ValueError:
+            return None, (400, {"error": "Bad Content-Length header."})
+        if length > 2_000_000:
+            return None, (413, {"error": "Request body too large."})
+        if not length:
+            return None, None
+        raw = self.rfile.read(length)
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except Exception:
+            body = {}
+        # Every route reads its body with .get(); a JSON list/number/null
+        # used to reach them as-is and 500 with an AttributeError.
+        return (body if isinstance(body, dict) else {}), None
+
+    def _cookie(self, name: str) -> str:
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return v
+        return ""
+
+    def _client_ip(self) -> str:
+        ip = self.headers.get("X-Real-IP") or (self.headers.get("X-Forwarded-For") or "").split(",")[0]
+        return ip.strip()[:64]
+
+    def _dispatch_hosted(self, method: str):
+        """The website: accounts, one Postgres schema per account, one
+        transaction per request (db.request_scope), no local-machine features."""
+        parsed = urllib.parse.urlparse(self.path)
+        path, query = parsed.path, urllib.parse.parse_qs(parsed.query)
+        if path in ("/api/index", "/api/index.py") and query.get("__path"):
+            path = query.pop("__path")[0]          # Vercel rewrite fallback
+        if not path.startswith("/api/"):
+            return self._static(path)
+
+        key = (method, path)
+        if key in HOSTED_OFF:
+            return self._json(403, {"error": "Not available on the hosted website — it would act on the "
+                                             "server, not your machine. Use the local app for this."})
+        body, err = self._read_body()
+        if err:
+            return self._json(*err)
+        # A cross-site <form> can POST, but never as application/json without a
+        # CORS preflight this server never answers — so every POST must be JSON.
+        # (PATCH and DELETE can't be sent cross-site without a preflight at all.)
+        if method == "POST" and "application/json" not in (self.headers.get("Content-Type") or ""):
+            return self._json(415, {"error": "Send JSON (Content-Type: application/json)."})
+
+        route = None
+        for m, rx, fn in ROUTES:
+            if m == method:
+                match = rx.match(path)
+                if match:
+                    route = (fn, match.groupdict())
+                    break
+        if route is None:
+            return self._json(404, {"error": f"No route for {method} {path}"})
+        fn, params = route
+
+        _REQ.account_id = _REQ.email = _REQ.csrf = None
+        _REQ.ip = self._client_ip()
+        _REQ.cookie_token = self._cookie(SESSION_COOKIE)
+        extra: list = []
+        try:
+            _ensure_shared()
+            with db.request_scope(None) as scope:
+                if key not in PUBLIC_ROUTES:
+                    auth = self.headers.get("Authorization") or ""
+                    if key in BEARER_ROUTES and auth.startswith("Bearer "):
+                        acct = accounts.account_for_agent_token(auth[7:].strip())
+                        if acct is None:
+                            return self._json(401, {"error": "Agent token is invalid or revoked."})
+                        _REQ.account_id = acct
+                    else:
+                        sess = accounts.session(_REQ.cookie_token)
+                        if sess is None:
+                            return self._json(401, {"error": "Sign in first.", "auth_required": True})
+                        if method in MUTATING and self.headers.get(CSRF_HEADER) != sess["csrf"]:
+                            return self._json(403, {"error": "Missing or wrong CSRF token."})
+                        _REQ.account_id, _REQ.email, _REQ.csrf = sess["account_id"], sess["email"], sess["csrf"]
+                    schema = accounts.schema_for(_REQ.account_id)
+                    scope.use(schema)
+                    _ensure_space(schema)
+                try:
+                    result = fn(params, query, body)
+                except Err as e:
+                    if key not in COMMIT_ON_ERROR:
+                        raise
+                    # A failed login must still be COUNTED: committing here keeps the
+                    # lockout counter, which a rollback would quietly erase.
+                    failed = e
+                else:
+                    failed = None
+            if failed is not None:
+                raise failed
+        except Err as e:
+            return self._json(e.status, {"error": e.msg})
+        except Exception as e:                                   # noqa: BLE001
+            import traceback
+            traceback.print_exc()
+            return self._json(500, {"error": f"{type(e).__name__}: {e}"})
+        if isinstance(result, dict):
+            sess = result.pop("_session", None)
+            if sess:
+                extra.append(("Set-Cookie", f"{SESSION_COOKIE}={sess['token']}; Path=/; HttpOnly; Secure; "
+                                            f"SameSite=Lax; Max-Age={sess['max_age']}"))
+                result["csrf_token"] = sess["csrf"]
+            if result.pop("_clear_session", False):
+                extra.append(("Set-Cookie", f"{SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"))
+        return self._json(200, result, extra)
 
     def _host_ok(self) -> bool:
         """Reject any request whose Host header isn't this server's own
@@ -788,6 +1055,15 @@ class Handler(BaseHTTPRequestHandler):
         return hostname in allowed
 
     def _dispatch(self, method: str):
+        try:
+            if db.hosted():
+                return self._dispatch_hosted(method)
+            return self._dispatch_local(method)
+        finally:
+            if db.is_pg():
+                db.close()          # one connection per request; nothing leaks
+
+    def _dispatch_local(self, method: str):
         if not self._host_ok():
             return self._json(403, {"error": "Host header not allowed."})
 
@@ -797,21 +1073,9 @@ class Handler(BaseHTTPRequestHandler):
         if not path.startswith("/api/"):
             return self._static(path)
 
-        body = None
-        try:
-            length = max(0, int(self.headers.get("Content-Length") or 0))
-        except ValueError:
-            return self._json(400, {"error": "Bad Content-Length header."})
-        if length:
-            raw = self.rfile.read(length)
-            try:
-                body = json.loads(raw.decode("utf-8"))
-            except Exception:
-                body = {}
-            # Every route reads its body with .get(); a JSON list/number/null
-            # used to reach them as-is and 500 with an AttributeError.
-            if not isinstance(body, dict):
-                body = {}
+        body, err = self._read_body()
+        if err:
+            return self._json(*err)
 
         if method in MUTATING and self.headers.get(CSRF_HEADER) != CSRF_TOKEN:
             return self._json(403, {"error": "Missing or wrong CSRF token."})

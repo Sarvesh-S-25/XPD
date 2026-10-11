@@ -15,6 +15,25 @@ from pathlib import Path
 
 TIMEOUT = 120
 
+# On the hosted website these checks would run on the *server*: `command` and
+# `tests` would execute shell commands for anyone with an account, and the file
+# checks would read the server's own files. Only checks that touch nothing
+# outside the project's own data are allowed there. Enforced in check() itself,
+# so no route can reach a disallowed one.
+HOSTED_KINDS = ("manual", "no_progress")
+
+
+def _hosted() -> bool:
+    from . import db
+    return db.hosted()
+
+
+def kinds() -> dict:
+    """The checks this deployment offers."""
+    if _hosted():
+        return {k: v for k, v in KINDS.items() if k in HOSTED_KINDS}
+    return dict(KINDS)
+
 KINDS = {
     "manual":        "Manual — you mark it satisfied",
     "file_exists":   "File exists and is non-empty",
@@ -44,6 +63,8 @@ TEST_CMDS = [
 
 
 def default_for(task_class: str, workdir: str = "") -> tuple[str, str]:
+    if _hosted():
+        return ("manual", "")
     kind, spec = CLASS_DEFAULT.get(task_class, ("manual", ""))
     if kind == "tests":
         cmd = detect_tests(workdir)
@@ -83,6 +104,10 @@ def check(kind: str, spec: str, workdir: str = "", last_output: str = "",
     """
     kind = (kind or "manual").strip()
     spec = (spec or "").strip()
+    if _hosted() and kind not in HOSTED_KINDS:
+        return {"satisfied": 0, "note": "That check is not available on the hosted website: "
+                "it would run on the server, not on your machine. Mark the step done by hand.",
+                "detail": ""}
     cwd = _safe_dir(workdir)
 
     try:

@@ -2,7 +2,11 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
+import urllib.error
+import urllib.request
 import threading
 import time
 import webbrowser
@@ -35,7 +39,16 @@ def main(argv=None) -> int:
     ap.add_argument("--cwd", default="", help="with --log-usage: the project folder")
     ap.add_argument("--cost", type=float, default=None,
                     help="with --log-usage: the real cost in USD, if you have it")
+    ap.add_argument("--remote", default=os.environ.get("PROMPTMETER_URL", ""),
+                    help="with --log-usage: send to a hosted PromptMeter at this https:// address "
+                         "instead of the local database (or set PROMPTMETER_URL)")
+    ap.add_argument("--token", default=os.environ.get("PROMPTMETER_TOKEN", ""),
+                    help="with --remote: your agent token from the website's Setup page "
+                         "(or set PROMPTMETER_TOKEN)")
     args = ap.parse_args(argv)
+
+    if args.log_usage and args.remote:
+        return _log_usage(args)        # reports to the website; never touches a local database
 
     db.init()
 
@@ -76,6 +89,8 @@ def _log_usage(args) -> int:
            "cache_read": args.cache_read, "agent": args.agent, "cwd": args.cwd}
     if args.cost is not None:
         rec["cost_usd"] = args.cost
+    if args.remote:
+        return _log_usage_remote(args, rec)
     try:
         r = watcher.add_usage([rec])
     except ValueError as e:
@@ -83,6 +98,38 @@ def _log_usage(args) -> int:
         return 2
     print(f"\n  Recorded {r['added']} turn for {args.model}."
           + (f"\n  {r['note']}" if r["note"] else ""))
+    return 0
+
+
+def _log_usage_remote(args, rec: dict) -> int:
+    """POST one turn to a hosted PromptMeter. The only network call this
+    program makes, and only when asked to with --remote."""
+    url = args.remote.strip().rstrip("/")
+    local = url.startswith(("http://127.0.0.1", "http://localhost"))
+    if not url.startswith("https://") and not local:
+        print("\n  --remote must be an https:// address.")
+        return 2
+    if not args.token.startswith("pm_"):
+        print("\n  --remote needs --token (an agent token from the website's Setup page).")
+        return 2
+    req = urllib.request.Request(
+        url + "/api/usage", data=json.dumps(rec).encode(), method="POST",
+        headers={"Content-Type": "application/json", "Authorization": "Bearer " + args.token})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            r = json.loads(resp.read().decode() or "{}")
+    except urllib.error.HTTPError as e:
+        try:
+            msg = json.loads(e.read().decode()).get("error", "")
+        except Exception:                               # noqa: BLE001
+            msg = ""
+        print(f"\n  Not recorded: the website said {e.code}" + (f" - {msg}" if msg else "") + ".")
+        return 2
+    except (urllib.error.URLError, TimeoutError) as e:
+        print(f"\n  Not recorded: could not reach {url} ({getattr(e, 'reason', e)}).")
+        return 2
+    print(f"\n  Recorded {r.get('added', 0)} turn for {args.model} on {url}."
+          + (f"\n  {r['note']}" if r.get("note") else ""))
     return 0
 
 

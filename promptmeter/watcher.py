@@ -67,10 +67,19 @@ CREATE TABLE IF NOT EXISTS scanned (
 """
 
 
+_INITED: set = set()
+
+
 def init() -> None:
-    conn = db.connect()
-    conn.executescript(EXTRA_SCHEMA)
-    conn.commit()
+    """Create the ledger tables if missing — once per database per process, so
+    callers can invoke it before any query without paying DDL every time."""
+    key = (db.database_url(), getattr(db._LOCAL, "schema", None) or
+           __import__("os").environ.get("PROMPTMETER_PG_SCHEMA", ""),
+           "" if db.is_pg() else str(db.db_path()))
+    if key in _INITED:
+        return
+    db.executescript(EXTRA_SCHEMA)
+    _INITED.add(key)
 
 
 # ---------------------------------------------------------------- paths
@@ -363,17 +372,13 @@ def add_usage(records: list) -> dict:
         if not known:
             unknown.add(rec["model"])
     init()
-    conn = db.connect()
     added = 0
+    cols = ("uuid", "ts", "session_id", "project", "cwd", "model", "in_tokens", "out_tokens",
+            "cache_read", "cache_1h", "cache_5m", "cost_usd")
     for rec in parsed:
-        cur = conn.execute(
-            """INSERT OR IGNORE INTO turns
-               (uuid,ts,session_id,project,cwd,model,in_tokens,out_tokens,
-                cache_read,cache_1h,cache_5m,cost_usd,source)
-               VALUES(:uuid,:ts,:session_id,:project,:cwd,:model,:in_tokens,
-                      :out_tokens,:cache_read,:cache_1h,:cache_5m,:cost_usd,'api')""", rec)
-        added += cur.rowcount
-    conn.commit()
+        added += db.run_count(
+            f"INSERT OR IGNORE INTO turns ({','.join(cols)},source) "
+            f"VALUES({','.join('?' * len(cols))},'api')", tuple(rec[c] for c in cols))
     return {"added": added, "duplicates": len(parsed) - added,
             "unknown_models": sorted(unknown),
             "note": ("Priced with a neutral fallback - add these under Setup > Your own "

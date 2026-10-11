@@ -12,9 +12,10 @@ from __future__ import annotations
 import unittest
 
 from promptmeter import estimator
+from tests.helpers import DBTestCase
 
 
-class ClassifyDetailTest(unittest.TestCase):
+class ClassifyDetailTest(DBTestCase):
     def test_bare_word_is_ambiguous(self):
         d = estimator.classify_detail("swiggy")
         self.assertTrue(d["ambiguous"])

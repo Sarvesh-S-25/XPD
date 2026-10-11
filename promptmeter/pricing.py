@@ -310,6 +310,8 @@ def default_model() -> str:
     saved = db.get_setting("default_model")
     if saved in cat:
         return saved
+    from . import watcher
+    watcher.init()                  # turns must exist: a failed query poisons a transaction
     try:
         row = db.row(
             """SELECT model, SUM(n) AS n FROM (
