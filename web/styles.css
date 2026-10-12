@@ -1030,8 +1030,3 @@ details summary { color: var(--text-primary); }
 .provider-title { margin: 22px 0 6px; font-size: 1.25rem; }
 .limit-row { padding: 14px 0; border-bottom: 1px solid var(--grid); }
 .limit-row:last-of-type { border-bottom: 0; }
-
-/* Website sign-in screens. */
-.auth-card { max-width: 520px; }
-.auth h1 { font-size: clamp(2rem, 5vw, 3.6rem); }
-.nav-item[hidden] { display: none; }

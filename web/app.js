@@ -3,7 +3,7 @@
 const S = { route: 'plan', id: null, status: null, models: [], vendors: [],
             efforts: ['none','low','medium','high','max'], model: '',
             effort: 'medium', surface: 'terminal', plans: [], oracles: [], cache: {},
-            csrfToken: null, hosted: false, account: null, token: null };
+            csrfToken: null, hosted: false };
 
 /* ------------------------------------------------------------------ api */
 
@@ -36,13 +36,6 @@ async function api(path, opts = {}) {
       S.csrfToken = s.csrf_token;
       return api(path, { ...opts, _retried: true });
     }
-  }
-  if (r.status === 401 && j.auth_required) {
-    // Signed out (or the session expired) on the website: back to sign-in.
-    S.hosted = true;
-    S.account = null;
-    if (!AUTH_ROUTES.has(S.route)) { S.route = 'signin'; location.hash = 'signin'; render(); }
-    throw new Error('Sign in first.');
   }
   if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
   return j;
@@ -2156,162 +2149,10 @@ function ownModelsCard() {
   </div>`;
 }
 
-/* --------------------------------------------------------- website: accounts */
-
-// Screens for the hosted website only. The local app has no accounts.
-function authShell(title, sub, inner) {
-  return `<section class="hero-block auth">
-    <div class="eyebrow">PromptMeter</div>
-    <h1>${esc(title)}</h1>
-    <p class="lede">${esc(sub)}</p>
-  </section>
-  <div class="card auth-card">${inner}</div>`;
-}
-
-async function authPost(path, body) {
-  // Auth routes need no CSRF token (there is no session yet); the server only
-  // accepts them as JSON, which a cross-site form cannot send.
-  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(body) });
-  const j = await r.json().catch(() => ({ error: 'Bad response' }));
-  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
-  return j;
-}
-
-async function signedIn(res) {
-  S.csrfToken = res.csrf_token;
-  S.status = null;
-  const st = await api('/api/status');
-  S.status = st; S.account = st.account; S.csrfToken = st.csrf_token;
-  const m = await api('/api/models');
-  S.models = m.models; S.vendors = m.vendors || []; S.oracles = m.oracles;
-  if (!S.models.some(x => x.id === S.model)) S.model = m.default_model || S.models[0]?.id;
-  go('plan');
-}
-
-function authNote(id, text, bad) {
-  const el = document.getElementById(id);
-  if (el) { el.className = 'banner mt12 ' + (bad ? 'critical' : 'good'); el.textContent = text; el.hidden = false; }
-}
-
-function viewSignin() {
-  return authShell('Sign in', 'pick up your projects and usage where you left them.', `
-    <form onsubmit="doSignin(event)">
-      <div class="field"><label for="a-email">Email</label><input id="a-email" type="email" autocomplete="email" required></div>
-      <div class="field"><label for="a-pw">Password</label><input id="a-pw" type="password" autocomplete="current-password" required></div>
-      <div class="row"><button class="btn-primary" type="submit">Sign in</button>
-        <a href="#forgot">Forgot your password?</a></div>
-      <div id="a-note" class="banner mt12" hidden></div>
-    </form>
-    <p class="small muted mt16">New here? <a href="#signup">Create an account</a>.</p>`);
-}
-
-async function doSignin(e) {
-  e.preventDefault();
-  try {
-    await signedIn(await authPost('/api/auth/login', {
-      email: document.getElementById('a-email').value, password: document.getElementById('a-pw').value }));
-  } catch (err) {
-    authNote('a-note', err.message, true);
-    if (/Verify your email/.test(err.message)) {
-      const n = document.getElementById('a-note');
-      const b = document.createElement('button');
-      b.type = 'button'; b.className = 'btn-sm mt8'; b.textContent = 'Send a new link';
-      b.onclick = () => resendVerify(document.getElementById('a-email').value);
-      n.appendChild(document.createElement('br')); n.appendChild(b);
-    }
-  }
-}
-
-async function resendVerify(email) {
-  try { authNote('a-note', (await authPost('/api/auth/resend', { email })).message, false); }
-  catch (err) { authNote('a-note', err.message, true); }
-}
-
-function viewSignup() {
-  return authShell('Create an account', 'estimate any prompt, for any model, and track what your agents cost.', `
-    <form onsubmit="doSignup(event)">
-      <div class="field"><label for="a-email">Email</label><input id="a-email" type="email" autocomplete="email" required></div>
-      <div class="field"><label for="a-pw">Password <span class="muted">(at least 10 characters)</span></label>
-        <input id="a-pw" type="password" autocomplete="new-password" minlength="10" required></div>
-      <div class="row"><button class="btn-primary" type="submit">Create account</button></div>
-      <div id="a-note" class="banner mt12" hidden></div>
-    </form>
-    <p class="small muted mt16">Already have one? <a href="#signin">Sign in</a>.</p>`);
-}
-
-async function doSignup(e) {
-  e.preventDefault();
-  try {
-    const r = await authPost('/api/auth/signup', {
-      email: document.getElementById('a-email').value, password: document.getElementById('a-pw').value });
-    authNote('a-note', r.message + ' The link works for 24 hours.', false);
-  } catch (err) { authNote('a-note', err.message, true); }
-}
-
-function viewForgot() {
-  return authShell('Reset your password', 'we’ll email you a link to choose a new one.', `
-    <form onsubmit="doForgot(event)">
-      <div class="field"><label for="a-email">Email</label><input id="a-email" type="email" autocomplete="email" required></div>
-      <div class="row"><button class="btn-primary" type="submit">Email me a link</button>
-        <a href="#signin">Back to sign in</a></div>
-      <div id="a-note" class="banner mt12" hidden></div>
-    </form>`);
-}
-
-async function doForgot(e) {
-  e.preventDefault();
-  try { authNote('a-note', (await authPost('/api/auth/forgot', { email: document.getElementById('a-email').value })).message, false); }
-  catch (err) { authNote('a-note', err.message, true); }
-}
-
-async function viewVerify() {
-  // Wipe the one-time token out of the address bar and history straight away.
-  const token = S.token;
-  history.replaceState(null, '', location.pathname + '#signin');
-  try {
-    await signedIn(await authPost('/api/auth/verify', { token }));
-    toast('Email confirmed — you’re in.');
-    return '';
-  } catch (err) {
-    return authShell('That link didn’t work', 'it may have expired or already been used.', `
-      <div class="banner critical">${esc(err.message)}</div>
-      <p class="small mt12"><a href="#signin">Sign in</a> and use “Send a new link”, or <a href="#signup">sign up again</a>.</p>`);
-  }
-}
-
-function viewReset() {
-  return authShell('Choose a new password', 'this signs you out everywhere else.', `
-    <form onsubmit="doReset(event)">
-      <div class="field"><label for="a-pw">New password <span class="muted">(at least 10 characters)</span></label>
-        <input id="a-pw" type="password" autocomplete="new-password" minlength="10" required></div>
-      <div class="row"><button class="btn-primary" type="submit">Save and sign in</button></div>
-      <div id="a-note" class="banner mt12" hidden></div>
-    </form>`);
-}
-
-async function doReset(e) {
-  e.preventDefault();
-  const token = S.token;
-  try {
-    const res = await authPost('/api/auth/reset', { token, password: document.getElementById('a-pw').value });
-    history.replaceState(null, '', location.pathname + '#plan');
-    await signedIn(res);
-    toast('Password changed.');
-  } catch (err) { authNote('a-note', err.message, true); }
-}
-
-async function signOut() {
-  try { await api('/api/auth/logout', { method: 'POST', body: {} }); } catch {}
-  S.account = null; S.status = null; S.csrfToken = null;
-  go('signin');
-}
-
 /* --------------------------------------------------------- website: setup */
 
 async function viewSetupHosted() {
-  const c = await api('/api/setup');
-  const tokens = c.agent_tokens || [];
+  await api('/api/setup');
   const origin = location.origin;
   return `
   <div class="page-head">
@@ -2319,38 +2160,30 @@ async function viewSetupHosted() {
   </div>
 
   <div class="card">
-    <div class="card-head"><h2>Agent tokens</h2>
-      <span class="hint">how your agents report usage to this site</span></div>
-    <p class="small" style="max-width:68ch">Give each agent or machine its own token. A token can only report usage —
-      it can't read your projects or change anything else — and you can revoke it here at any time. It is shown once,
-      when you create it.</p>
-    <div class="row mt8" style="gap:8px;flex-wrap:wrap">
-      <input id="tok-label" placeholder="e.g. laptop codex" style="max-width:260px" aria-label="Token label">
-      <button class="btn-primary btn-sm" onclick="createToken()">Create a token</button>
-    </div>
-    <div id="tok-new" class="mt12" hidden></div>
-    ${tokens.length ? `<table class="mt12"><thead><tr><th>Label</th><th>Token</th><th>Created</th><th>Last used</th><th></th></tr></thead>
-      <tbody>${tokens.map(t => `<tr><td>${esc(t.label)}</td><td class="mono">${esc(t.prefix)}…</td>
-        <td class="small">${ago(t.created_at)}</td><td class="small">${t.last_used ? ago(t.last_used) : 'never'}</td>
-        <td class="num"><button class="btn-sm btn-danger" onclick="revokeToken('${esc(t.prefix)}')">Revoke</button></td></tr>`).join('')}
-      </tbody></table>` : '<div class="small muted mt12">No tokens yet.</div>'}
+    <div class="card-head"><h2>This site is shared</h2>
+      <span class="hint">no sign-in, one workspace</span></div>
+    <p class="small" style="max-width:68ch">There are no accounts here: everyone who opens this site sees the same
+      projects, prompts and reported usage, and anyone can change or erase them. Don't paste anything you wouldn't
+      show a stranger. For a private copy, run the local app (<span class="mono">start.bat</span>) — it keeps
+      everything in one file on your own machine.</p>
   </div>
 
   <div class="card">
     <div class="card-head"><h2>Report usage</h2>
       <span class="hint">Codex, Gemini CLI, Cursor, Aider, Claude Code hooks, your own scripts</span></div>
     <p class="small" style="max-width:68ch">From any machine with Python and this project's code, after each run:</p>
-    <div class="prompt-box mt8" id="usage-cli">python -m promptmeter --log-usage --model gpt-5.3-codex --in-tokens 12000 --out-tokens 900 --agent codex --remote ${esc(origin)} --token YOUR_TOKEN</div>
+    <div class="prompt-box mt8" id="usage-cli">python -m promptmeter --log-usage --model gpt-5.3-codex --in-tokens 12000 --out-tokens 900 --agent codex --remote ${esc(origin)}</div>
     <div class="row mt8"><button class="btn-sm" onclick="copyText('usage-cli','Command copied.')">Copy</button></div>
     <p class="small mt12" style="max-width:68ch">Or straight over HTTPS from anything:</p>
     <div class="prompt-box mt8" id="usage-http">curl -X POST ${esc(origin)}/api/usage \\
-  -H "Authorization: Bearer YOUR_TOKEN" -H "Content-Type: application/json" \\
+  -H "Content-Type: application/json" \\
   -d '{"model": "gpt-5.3-codex", "in_tokens": 12000, "out_tokens": 900, "agent": "codex"}'</div>
     <div class="row mt8"><button class="btn-sm" onclick="copyText('usage-http','Command copied.')">Copy</button></div>
     <div class="small muted mt8">Optional fields: <span class="mono">cost_usd</span> (record that exact price),
       <span class="mono">cache_read</span>, <span class="mono">cache_write</span>, <span class="mono">ts</span>,
       and <span class="mono">id</span> (makes a retry safe); or send <span class="mono">{"records": [...]}</span>.
-      Set <span class="mono">PROMPTMETER_URL</span> and <span class="mono">PROMPTMETER_TOKEN</span> to drop the last two flags.</div>
+      Set <span class="mono">PROMPTMETER_URL</span> to drop the <span class="mono">--remote</span> flag. Everything
+      reported here lands in the one shared ledger.</div>
   </div>
 
   ${ownModelsCard()}
@@ -2364,35 +2197,15 @@ async function viewSetupHosted() {
   </div>
 
   <div class="card">
-    <div class="card-head"><h2>Your account</h2></div>
-    <p class="small">Signed in as <strong>${esc((S.account || {}).email || '')}</strong>. Your projects, usage and
-      settings are kept apart from every other account.</p>
+    <div class="card-head"><h2>This workspace</h2></div>
     <div class="row mt8">
       <button onclick="seedDemo()">Load sample data</button>
       <button onclick="clearDemoData()">Clear sample data</button>
       <button class="btn-danger" onclick="resetAll()">Erase everything</button>
-      <button onclick="signOut()">Sign out</button>
     </div>
-    <div class="small muted mt8">“Erase everything” deletes your projects, history and reported usage on this site.</div>
+    <div class="small muted mt8">“Erase everything” deletes the projects, history and reported usage on this site —
+      for everyone, not just you.</div>
   </div>`;
-}
-
-async function createToken() {
-  try {
-    const t = await api('/api/tokens', { method: 'POST', body: { label: (document.getElementById('tok-label') || {}).value || '' } });
-    await render();
-    const box = document.getElementById('tok-new');
-    box.hidden = false;
-    box.innerHTML = `<div class="banner good"><strong>Copy it now — it won't be shown again.</strong>
-      <div class="prompt-box mt8" id="tok-value"></div>
-      <div class="row mt8"><button class="btn-sm" onclick="copyText('tok-value','Token copied.')">Copy token</button></div></div>`;
-    document.getElementById('tok-value').textContent = t.token;
-  } catch (e) { toast(e.message, true); }
-}
-
-async function revokeToken(prefix) {
-  try { await api('/api/tokens?prefix=' + encodeURIComponent(prefix), { method: 'DELETE' }); toast('Token revoked.'); render(); }
-  catch (e) { toast(e.message, true); }
 }
 
 function customModelsList() {
@@ -2535,35 +2348,12 @@ function goProject(id) { S.route = 'project'; S.id = id; S.cache.openStep = null
 const VIEWS = {
   dashboard: viewDashboard, plan: viewPlan, projects: viewProjects,
   project: viewProject, history: viewHistory, setup: viewSetup,
-  signin: viewSignin, signup: viewSignup, forgot: viewForgot, verify: viewVerify, reset: viewReset,
 };
-// Screens a signed-out visitor of the website may see.
-const AUTH_ROUTES = new Set(['signin', 'signup', 'forgot', 'verify', 'reset']);
 
 let renderSeq = 0;
 let lastViewKey = null;     // route+id of the previous render, to tell navigation from a refresh
 
-function syncChrome() {
-  const signedOut = S.hosted && !S.account;
-  document.querySelectorAll('.nav-item[data-route]').forEach(b => { b.hidden = signedOut; });
-  let acct = document.getElementById('nav-account');
-  if (S.hosted && S.account) {
-    if (!acct) {
-      acct = document.createElement('button');
-      acct.id = 'nav-account';
-      acct.className = 'nav-item';
-      acct.onclick = signOut;
-      document.getElementById('theme-toggle').before(acct);
-    }
-    acct.textContent = 'Sign out';
-    acct.title = 'Signed in as ' + S.account.email;
-  } else if (acct) {
-    acct.remove();
-  }
-}
-
 async function render() {
-  syncChrome();
   const host = document.getElementById('view');
   document.querySelectorAll('.nav-item[data-route]').forEach(b =>
     b.classList.toggle('active', b.dataset.route === S.route ||
@@ -2607,10 +2397,7 @@ function parseHash() {
   const h = (location.hash || '#plan').slice(1);
   const [r, id] = h.split('/');
   S.route = VIEWS[r] ? r : 'plan';
-  // verify/<token> and reset/<token> carry a one-time token from an email, not a number
-  S.token = (r === 'verify' || r === 'reset') ? (id || '') : null;
-  S.id = (id && S.token === null) ? Number(id) : null;
-  if (S.hosted && !S.account && !AUTH_ROUTES.has(S.route)) S.route = 'signin';
+  S.id = id ? Number(id) : null;
 }
 
 document.querySelectorAll('.nav-item[data-route]').forEach(b =>
@@ -2663,7 +2450,6 @@ document.addEventListener('pointermove', e => {
       S.status = s;
       S.csrfToken = s.csrf_token;
       S.hosted = !!s.hosted;
-      S.account = s.account || null;
       S.plans = s.plans || [];
       if (s.settings) {
         S.model = s.settings.model || S.model;
@@ -2676,11 +2462,6 @@ document.addEventListener('pointermove', e => {
     localStorage.setItem('pm-effort', S.effort);
   } catch {}
 
-  if (!S.status) {
-    // /api/status refused: on the website that means "not signed in".
-    const probe = await fetch('/api/status').then(r => r.json().then(j => ({ ok: r.ok, j }))).catch(() => null);
-    if (probe && !probe.ok && probe.j && probe.j.auth_required) S.hosted = true;
-  }
   parseHash();
   render();
 })();

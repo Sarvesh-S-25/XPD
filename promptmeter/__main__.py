@@ -42,9 +42,6 @@ def main(argv=None) -> int:
     ap.add_argument("--remote", default=os.environ.get("PROMPTMETER_URL", ""),
                     help="with --log-usage: send to a hosted PromptMeter at this https:// address "
                          "instead of the local database (or set PROMPTMETER_URL)")
-    ap.add_argument("--token", default=os.environ.get("PROMPTMETER_TOKEN", ""),
-                    help="with --remote: your agent token from the website's Setup page "
-                         "(or set PROMPTMETER_TOKEN)")
     args = ap.parse_args(argv)
 
     if args.log_usage and args.remote:
@@ -109,12 +106,9 @@ def _log_usage_remote(args, rec: dict) -> int:
     if not url.startswith("https://") and not local:
         print("\n  --remote must be an https:// address.")
         return 2
-    if not args.token.startswith("pm_"):
-        print("\n  --remote needs --token (an agent token from the website's Setup page).")
-        return 2
     req = urllib.request.Request(
         url + "/api/usage", data=json.dumps(rec).encode(), method="POST",
-        headers={"Content-Type": "application/json", "Authorization": "Bearer " + args.token})
+        headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             r = json.loads(resp.read().decode() or "{}")
